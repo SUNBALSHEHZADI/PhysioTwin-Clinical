@@ -62,6 +62,11 @@ export function buildGuidance(params: {
   avgY: number;
   phase: MovementPhase;
   statusLevel: "green" | "yellow" | "red";
+  angleDeg?: number;
+  safeMinDeg?: number;
+  safeMaxDeg?: number;
+  idealMinDeg?: number;
+  idealMaxDeg?: number;
   deviationDeg: number;
   deviationStopDeg: number;
   speedDegPerSec: number | null;
@@ -82,12 +87,13 @@ export function buildGuidance(params: {
   const positioningNeeded = mistakes.includes("low_confidence") || mistakes.includes("not_centered") || mistakes.includes("partial_visibility");
 
   if (positioningNeeded) {
+    const direction = params.avgX < 0.38 ? "to the right" : params.avgX > 0.62 ? "to the left" : "to the center";
     return {
       phase: "setup",
       mistakes,
       pauseAnalysis: true,
-      visual: "Position guidance: please center yourself and ensure the full limb is visible.",
-      voice: "Please step back slightly and center yourself so your full body is visible."
+      visual: `Position guidance: step back slightly, move ${direction}, and keep the full limb visible.`,
+      voice: `Please step back slightly and move ${direction}. Keep your full body visible.`
     };
   }
 
@@ -113,7 +119,7 @@ export function buildGuidance(params: {
   if (mistakes.includes("too_fast")) {
     return {
       ...base,
-      visual: "Please slow down your movement.",
+      visual: "Please slow down. Aim for a smooth, controlled pace.",
       voice: "Slow down. Try a smaller, controlled movement."
     };
   }
@@ -143,6 +149,27 @@ export function buildGuidance(params: {
   }
 
   // Mild deviation / coaching toward ideal band
+  if (typeof params.angleDeg === "number" && typeof params.idealMinDeg === "number" && typeof params.idealMaxDeg === "number") {
+    if (params.angleDeg < params.idealMinDeg) {
+      const cue =
+        params.module === "knee"
+          ? "Extend a little more, staying within the safe range."
+          : params.module === "shoulder"
+            ? "Lift a little higher, keeping your shoulder relaxed."
+            : "Bend a little more, keeping the movement smooth.";
+      return { ...base, visual: cue, voice: cue, pauseAnalysis: false };
+    }
+    if (params.angleDeg > params.idealMaxDeg) {
+      const cue =
+        params.module === "knee"
+          ? "Ease back slightly. Do not push past the safe range."
+          : params.module === "shoulder"
+            ? "Lower slightly. Keep the movement controlled."
+            : "Ease back slightly and keep the elbow controlled.";
+      return { ...base, visual: cue, voice: cue, pauseAnalysis: false };
+    }
+  }
+
   return {
     ...base,
     visual: "Slight deviation. Adjust gently and continue slowly.",

@@ -24,6 +24,8 @@ class TherapistSessionItem(BaseModel):
     risk_events: int
     adherence_score: int
     ai_confidence_pct: int
+    review_status: str | None = None  # draft | final
+    reviewed_at: str | None = None
 
 
 class TherapistSessionsResponse(BaseModel):
@@ -49,4 +51,31 @@ class TherapistAlertsResponse(BaseModel):
 class AlertReviewUpdate(BaseModel):
     review_status: str  # approved | rejected | noted
     review_note: str | None = None
+
+
+class TherapistReviewQueueItem(BaseModel):
+    alert_id: str
+    created_at: str
+    level: str
+    message: str
+    patient_id: str
+    patient_name: str | None = None
+
+
+class TherapistReviewQueueResponse(BaseModel):
+    alerts: list[TherapistReviewQueueItem]
+
+
+class SessionReviewUpdate(BaseModel):
+    review_status: str  # draft | final
+    clinician_note: str | None = None
+    clinician_outcome: str | None = None  # continue | pause | modify | follow_up
+
+
+class SessionReviewResponse(BaseModel):
+    session_id: str
+    review_status: str | None = None
+    clinician_note: str | None = None
+    clinician_outcome: str | None = None
+    reviewed_at: str | None = None
 

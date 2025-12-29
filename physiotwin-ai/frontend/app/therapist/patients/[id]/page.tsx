@@ -7,14 +7,15 @@ import { LineChart as LineIcon, ShieldAlert } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { api } from "@/lib/api";
-import { getAuth } from "@/utils/auth";
+import { getAuth, type AuthState } from "@/utils/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 export default function TherapistPatientDetailPage() {
-  const auth = getAuth();
+  const [auth, setAuthState] = useState<AuthState | null>(null);
+  const [mounted, setMounted] = useState(false);
   const params = useParams<{ id: string }>();
   const patientId = params?.id ?? "";
   const exerciseKey = "knee_extension_seated";
@@ -73,6 +74,11 @@ export default function TherapistPatientDetailPage() {
   );
 
   useEffect(() => {
+    setMounted(true);
+    setAuthState(getAuth());
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -115,6 +121,18 @@ export default function TherapistPatientDetailPage() {
       cancelled = true;
     };
   }, [patientId]);
+
+  if (!mounted) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Preparing patient view</CardTitle>
+          <CardDescription>Loading your therapist account.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">Please wait.</CardContent>
+      </Card>
+    );
+  }
 
   if (!auth?.email) {
     return (
@@ -326,7 +344,7 @@ export default function TherapistPatientDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle>Session logs</CardTitle>
-          <CardDescription>Export JSON/PDF to attach to EMR or review with patient.</CardDescription>
+          <CardDescription>Export PDF to attach to EMR or review with patient.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {sessions.length === 0 ? (
@@ -345,21 +363,6 @@ export default function TherapistPatientDetailPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={async () => {
-                      const json = await api.exportSessionJson(s.id);
-                      const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = `physiotwin_session_${s.id}.json`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    }}
-                  >
-                    Export JSON
-                  </Button>
                   <Button
                     variant="outline"
                     onClick={async () => {

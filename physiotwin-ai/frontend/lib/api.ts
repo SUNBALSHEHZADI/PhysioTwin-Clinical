@@ -40,6 +40,9 @@ export const api = {
       rep_limit: number;
       duration_sec: number;
       deviation_stop_deg: number;
+      protocol_version: number;
+      is_locked: boolean;
+      template_key: string | null;
     }>(`/prescription/${encodeURIComponent(exercise_key)}`);
   },
   async getPatientSummary() {
@@ -105,12 +108,15 @@ export const api = {
       rep_limit: number;
       duration_sec: number;
       deviation_stop_deg: number;
+      protocol_version: number;
+      is_locked: boolean;
+      template_key: string | null;
     }>(`/therapist/prescriptions/${encodeURIComponent(patient_id)}/${encodeURIComponent(exercise_key)}`);
   },
   async putTherapistPrescription(
     patient_id: string,
     exercise_key: string,
-    payload: { safe_min_deg: number; safe_max_deg: number; rep_limit: number; duration_sec: number }
+    payload: { safe_min_deg: number; safe_max_deg: number; rep_limit: number; duration_sec: number; is_locked?: boolean; template_key?: string | null }
   ) {
     return request<{
       patient_id: string;
@@ -120,6 +126,9 @@ export const api = {
       rep_limit: number;
       duration_sec: number;
       deviation_stop_deg: number;
+      protocol_version: number;
+      is_locked: boolean;
+      template_key: string | null;
     }>(`/therapist/prescriptions/${encodeURIComponent(patient_id)}/${encodeURIComponent(exercise_key)}`, {
       method: "PUT",
       body: JSON.stringify(payload)
@@ -139,6 +148,8 @@ export const api = {
         risk_events: number;
         adherence_score: number;
         ai_confidence_pct: number;
+        review_status?: string | null;
+        reviewed_at?: string | null;
       }>;
     }>(`/therapist/patients/${encodeURIComponent(patient_id)}/sessions`);
   },
@@ -166,6 +177,31 @@ export const api = {
       review_note: string | null;
       reviewed_at: string | null;
     }>(`/therapist/alerts/${encodeURIComponent(alert_id)}/review`, { method: "PUT", body: JSON.stringify(payload) });
+  }
+  ,
+  async getTherapistReviewQueue() {
+    return request<{
+      alerts: Array<{
+        alert_id: string;
+        created_at: string;
+        level: "yellow" | "red";
+        message: string;
+        patient_id: string;
+        patient_name: string | null;
+      }>;
+    }>("/therapist/review-queue");
+  },
+  async reviewSession(
+    session_id: string,
+    payload: { review_status: "draft" | "final"; clinician_note?: string | null; clinician_outcome?: string | null }
+  ) {
+    return request<{
+      session_id: string;
+      review_status: string | null;
+      clinician_note: string | null;
+      clinician_outcome: string | null;
+      reviewed_at: string | null;
+    }>(`/therapist/sessions/${encodeURIComponent(session_id)}/review`, { method: "PUT", body: JSON.stringify(payload) });
   }
 };
 

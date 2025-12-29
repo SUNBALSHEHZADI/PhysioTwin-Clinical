@@ -10,12 +10,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
-import { getAuth } from "@/utils/auth";
+import { getAuth, type AuthState } from "@/utils/auth";
 import { saveSession } from "@/utils/sessionStore";
 import { moduleByKey, setSelectedModule, type RehabModuleKey } from "@/components/rehab/modules";
 
 export default function SessionPage() {
-  const auth = getAuth();
+  // Avoid hydration mismatch: localStorage auth is only available after mount.
+  const [auth, setAuthState] = useState<AuthState | null>(null);
+  const [mounted, setMounted] = useState(false);
   const searchParams = useSearchParams();
   const [saved, setSaved] = useState(false);
   const [saveMode, setSaveMode] = useState<"api" | "local" | null>(null);
@@ -27,6 +29,9 @@ export default function SessionPage() {
         repLimit: number;
         durationSec: number;
         deviationStopDeg: number;
+        isLocked?: boolean;
+        protocolVersion?: number;
+        templateKey?: string | null;
       }
     | null
   >(null);
@@ -47,6 +52,11 @@ export default function SessionPage() {
   );
 
   useEffect(() => {
+    setMounted(true);
+    setAuthState(getAuth());
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -57,7 +67,10 @@ export default function SessionPage() {
           safeMaxDeg: r.safe_max_deg,
           repLimit: r.rep_limit,
           durationSec: r.duration_sec,
-          deviationStopDeg: r.deviation_stop_deg
+          deviationStopDeg: r.deviation_stop_deg,
+          isLocked: Boolean(r.is_locked),
+          protocolVersion: r.protocol_version,
+          templateKey: r.template_key
         });
       } catch {
         if (!cancelled) setRx(fallbackRx);
@@ -72,6 +85,18 @@ export default function SessionPage() {
     // Persist module choice for dashboard convenience.
     if (moduleKey) setSelectedModule(moduleKey);
   }, [moduleKey]);
+
+  if (!mounted) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Preparing session</CardTitle>
+          <CardDescription>Loading your account and clinician prescription.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">Please wait.</CardContent>
+      </Card>
+    );
+  }
 
   if (!auth?.email) {
     return (
@@ -127,12 +152,41 @@ export default function SessionPage() {
       </div>
 
       {rx ? (
-        <PoseSession
-          exerciseKey={exerciseKey}
-          moduleTitle={mod.title}
-          idealPreference={mod.idealPreference}
-          prescription={rx}
-          onComplete={async (payload) => {
+        rx.isLocked ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Session locked by clinician</CardTitle>
+              <CardDescription>
+                Your clinician has paused progression for this module. Please contact your clinician before continuing.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-sm text-muted-foreground">
+                Protocol version: <span className="font-medium text-foreground">{rx.protocolVersion ?? "—"}</span>
+                {rx.templateKey ? (
+                  <>
+                    {" "}
+                    • Template: <span className="font-medium text-foreground">{rx.templateKey}</span>
+                  </>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button asChild>
+                  <Link href="/dashboard">Back to Dashboard</Link>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link href="/therapist">Clinician portal</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <PoseSession
+            exerciseKey={exerciseKey}
+            moduleTitle={mod.title}
+            idealPreference={mod.idealPreference}
+            prescription={rx}
+            onComplete={async (payload) => {
           setSaved(false);
           setSavedLabel(payload.isPartial ? "Practice saved" : "Session saved");
           try {
@@ -169,7 +223,8 @@ export default function SessionPage() {
             setSaveMode("local");
           }
           }}
-        />
+          />
+        )
       ) : (
         <Card>
           <CardHeader>

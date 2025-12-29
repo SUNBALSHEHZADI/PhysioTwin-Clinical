@@ -6,14 +6,19 @@ from sqlalchemy import desc
 from api.deps import CurrentUserDep, DbDep
 from models.alert import RiskAlert
 from models.session import ExerciseSession
+from models.user import User
 from schemas.therapist import (
     AlertReviewUpdate,
     TherapistAlertItem,
     TherapistAlertsResponse,
     TherapistPatientItem,
     TherapistPatientsResponse,
+    TherapistReviewQueueItem,
+    TherapistReviewQueueResponse,
     TherapistSessionItem,
     TherapistSessionsResponse,
+    SessionReviewUpdate,
+    SessionReviewResponse,
 )
 from services.progress_service import build_therapist_patients
 from schemas.prescription import PrescriptionResponse, PrescriptionUpdate
@@ -55,11 +60,70 @@ def therapist_patient_sessions(patient_id: str, db: DbDep, user: CurrentUserDep)
                 risk_events=int(s.risk_events),
                 adherence_score=int(s.adherence_score),
                 ai_confidence_pct=int(s.ai_confidence_pct),
+                review_status=s.review_status,
+                reviewed_at=s.reviewed_at.isoformat() if s.reviewed_at else None,
             )
             for s in sessions
         ],
     )
 
+
+@router.get("/review-queue", response_model=TherapistReviewQueueResponse)
+def therapist_review_queue(db: DbDep, user: CurrentUserDep):
+    if user.role != "therapist":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Therapist access required.")
+
+    rows = (
+        db.query(RiskAlert, User)
+        .join(User, User.id == RiskAlert.user_id)
+        .filter(RiskAlert.review_status.is_(None))
+        .order_by(desc(RiskAlert.created_at))
+        .limit(60)
+        .all()
+    )
+    items = [
+        TherapistReviewQueueItem(
+            alert_id=str(a.id),
+            created_at=a.created_at.isoformat(),
+            level=a.level,
+            message=a.message,
+            patient_id=str(u.id),
+            patient_name=u.name,
+        )
+        for (a, u) in rows
+    ]
+    return TherapistReviewQueueResponse(alerts=items)
+
+
+@router.put("/sessions/{session_id}/review", response_model=SessionReviewResponse)
+def review_session(session_id: str, payload: SessionReviewUpdate, db: DbDep, user: CurrentUserDep):
+    if user.role != "therapist":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Therapist access required.")
+
+    allowed = {"draft", "final"}
+    if payload.review_status not in allowed:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid review_status.")
+
+    s = db.query(ExerciseSession).filter(ExerciseSession.id == session_id).first()
+    if not s:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
+
+    s.review_status = payload.review_status
+    s.clinician_note = payload.clinician_note
+    s.clinician_outcome = payload.clinician_outcome
+    s.reviewed_by = str(user.id)
+    s.reviewed_at = datetime.utcnow()
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+
+    return SessionReviewResponse(
+        session_id=str(s.id),
+        review_status=s.review_status,
+        clinician_note=s.clinician_note,
+        clinician_outcome=s.clinician_outcome,
+        reviewed_at=s.reviewed_at.isoformat() if s.reviewed_at else None,
+    )
 
 @router.get("/patients/{patient_id}/alerts", response_model=TherapistAlertsResponse)
 def therapist_patient_alerts(patient_id: str, db: DbDep, user: CurrentUserDep):

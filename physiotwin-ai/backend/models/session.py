@@ -28,6 +28,13 @@ class ExerciseSession(Base):
     angle_samples_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     events_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
+    # Therapist asynchronous review (MVP)
+    review_status: Mapped[str | None] = mapped_column(String, nullable=True)  # "draft" | "final"
+    clinician_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    clinician_outcome: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g. "continue" | "pause" | "modify"
+    reviewed_by: Mapped[str | None] = mapped_column(String, nullable=True)  # therapist user_id
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 

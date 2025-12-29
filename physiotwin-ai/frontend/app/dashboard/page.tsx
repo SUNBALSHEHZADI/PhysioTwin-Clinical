@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getAuth } from "@/utils/auth";
+import { getAuth, type AuthState } from "@/utils/auth";
 import { ClinicalChatDialog } from "@/components/chat/ClinicalChatDialog";
 import { getSelectedModule, setSelectedModule, REHAB_MODULES, type RehabModuleKey } from "@/components/rehab/modules";
 import { loadSessions } from "@/utils/sessionStore";
@@ -30,13 +30,54 @@ function fallbackSummary(): Summary {
 }
 
 export default function PatientDashboardPage() {
-  const auth = getAuth();
+  const [auth, setAuthState] = useState<AuthState | null>(null);
+  const [mounted, setMounted] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [mode, setMode] = useState<"live" | "fallback">("live");
   const [moduleKey, setModuleKey] = useState<RehabModuleKey | null>(null);
   const [recentSessions, setRecentSessions] = useState<
     Array<{ id: string; created_at: string; exercise_key: string; reps_completed: number; risk_events: number; is_partial?: boolean }>
   >([]);
+  const [exportingId, setExportingId] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  function base64ToBytes(b64: string) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  async function exportPdf(sessionId: string) {
+    setExportError(null);
+    setExportingId(sessionId);
+    try {
+      const data = await api.exportSessionPdf(sessionId);
+      const bytes = base64ToBytes(data.base64);
+      const blob = new Blob([bytes], { type: data.content_type || "application/pdf" });
+      downloadBlob(blob, data.filename || `physiotwin_clinical_session_${sessionId}.pdf`);
+    } catch (e) {
+      setExportError((e as Error)?.message ?? "Export failed.");
+    } finally {
+      setExportingId(null);
+    }
+  }
+
+  useEffect(() => {
+    setMounted(true);
+    setAuthState(getAuth());
+  }, []);
 
   useEffect(() => {
     setModuleKey(getSelectedModule().key);
@@ -89,6 +130,18 @@ export default function PatientDashboardPage() {
   const alertsCount = useMemo(() => summary?.alerts?.length ?? 0, [summary]);
   const sessionsCount = useMemo(() => summary?.completed_sessions ?? 0, [summary]);
   const mod = useMemo(() => REHAB_MODULES.find((m) => m.key === moduleKey) ?? REHAB_MODULES[0], [moduleKey]);
+
+  if (!mounted) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Preparing dashboard</CardTitle>
+          <CardDescription>Loading your account.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">Please wait.</CardContent>
+      </Card>
+    );
+  }
 
   if (!auth?.email) {
     return (
@@ -209,6 +262,9 @@ export default function PatientDashboardPage() {
           <div className="rounded-2xl border border-border bg-background p-4">
             <div className="text-sm font-semibold">Recent practice</div>
             <div className="mt-1 text-xs text-muted-foreground">A short list of your latest saved sessions.</div>
+            {exportError ? (
+              <div className="mt-3 rounded-2xl border border-rose-100 bg-rose-50 p-3 text-xs text-rose-700">{exportError}</div>
+            ) : null}
             <div className="mt-3 space-y-2">
               {recentSessions.length === 0 ? (
                 <div className="text-sm text-muted-foreground">No saved sessions yet.</div>
@@ -226,16 +282,27 @@ export default function PatientDashboardPage() {
                         <div className="text-sm font-medium">{title}</div>
                         <div className="text-xs text-muted-foreground">{new Date(s.created_at).toLocaleString()}</div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
                         {s.is_partial ? <Badge variant="warning">Partial</Badge> : <Badge variant="success">Saved</Badge>}
                         <div className="text-xs text-muted-foreground">Reps: {s.reps_completed}</div>
                         <div className="text-xs text-muted-foreground">Risk: {s.risk_events}</div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => exportPdf(s.id)}
+                            disabled={mode !== "live" || exportingId === s.id}
+                          >
+                            Export PDF
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   );
                 })
               )}
             </div>
+            {mode !== "live" ? <div className="mt-2 text-xs text-muted-foreground">Exports require backend connection.</div> : null}
           </div>
         </CardContent>
       </Card>

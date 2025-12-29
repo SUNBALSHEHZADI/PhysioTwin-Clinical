@@ -80,7 +80,7 @@ export function useSpeechRecognition(opts?: { lang?: string }) {
       recRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctor]);
+  }, [ctor, opts?.lang]);
 
   const start = useCallback(() => {
     setError(null);

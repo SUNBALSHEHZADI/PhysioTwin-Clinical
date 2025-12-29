@@ -6,7 +6,7 @@ import { BarChart3, LineChart as LineIcon, Percent, TriangleAlert } from "lucide
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { api } from "@/lib/api";
-import { getAuth } from "@/utils/auth";
+import { getAuth, type AuthState } from "@/utils/auth";
 import { loadSessions } from "@/utils/sessionStore";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,9 +23,15 @@ function fallbackProgressFromLocal(): Progress {
 }
 
 export default function ProgressPage() {
-  const auth = getAuth();
+  const [auth, setAuthState] = useState<AuthState | null>(null);
+  const [mounted, setMounted] = useState(false);
   const [data, setData] = useState<Progress | null>(null);
   const [mode, setMode] = useState<"live" | "fallback">("live");
+  useEffect(() => {
+    setMounted(true);
+    setAuthState(getAuth());
+  }, []);
+
   const [sessions, setSessions] = useState<
     Array<{
       id: string;
@@ -40,16 +46,6 @@ export default function ProgressPage() {
       ai_confidence_pct: number;
     }>
   >([]);
-
-  function downloadJson(filename: string, obj: unknown) {
-    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
 
   function downloadBase64(filename: string, contentType: string, b64: string) {
     const byteChars = atob(b64);
@@ -120,6 +116,18 @@ export default function ProgressPage() {
 
   const angleSeries = useMemo(() => data?.angle_improvement ?? [], [data]);
   const painSeries = useMemo(() => data?.pain_vs_time ?? [], [data]);
+
+  if (!mounted) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Preparing progress</CardTitle>
+          <CardDescription>Loading your account.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">Please wait.</CardContent>
+      </Card>
+    );
+  }
 
   if (!auth?.email) {
     return (
@@ -251,7 +259,7 @@ export default function ProgressPage() {
       <Card>
         <CardHeader>
           <CardTitle>Session history</CardTitle>
-          <CardDescription>Exportable clinical logs (JSON/PDF) are available when connected.</CardDescription>
+          <CardDescription>Exportable clinical logs (PDF) are available when connected.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {sessions.length === 0 ? (
@@ -271,16 +279,6 @@ export default function ProgressPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    disabled={mode !== "live"}
-                    onClick={async () => {
-                      const json = await api.exportSessionJson(s.id);
-                      downloadJson(`physiotwin_session_${s.id}.json`, json);
-                    }}
-                  >
-                    Export JSON
-                  </Button>
                   <Button
                     variant="outline"
                     disabled={mode !== "live"}

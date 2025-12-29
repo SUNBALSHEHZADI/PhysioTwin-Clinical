@@ -42,7 +42,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <LogoMark />
             <div className="leading-tight">
               <div className="text-sm font-semibold">PhysioTwin Clinical</div>
-              <div className="text-xs text-muted-foreground">Physiotherapy CDSS • Knee Rehab</div>
+              <div className="text-xs text-muted-foreground">Clinical Decision Support for Physiotherapy Rehabilitation</div>
             </div>
           </Link>
 

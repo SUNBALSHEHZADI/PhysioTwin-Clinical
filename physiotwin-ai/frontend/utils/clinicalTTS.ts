@@ -14,18 +14,34 @@ export type ClinicalTTSOptions = {
   minIntervalMs?: number;
   /** Optional key to dedupe beyond raw text. */
   dedupeKey?: string;
+  /** Override voice rate (0.1-10, practical: 0.7-1.2). */
+  rate?: number;
+  /** Override voice URI selection (exact match). */
+  voiceURI?: string | null;
+  /** Override language. */
+  lang?: string;
+  /** Cancel any ongoing/pending speech before speaking (useful for chat read-aloud). */
+  cancelPrevious?: boolean;
+  /** If speech is currently active, skip speaking (default true for non-high priority). */
+  skipIfBusy?: boolean;
 };
 
-function pickVoice(): SpeechSynthesisVoice | null {
+function pickVoice(opts?: { voiceURI?: string | null; lang?: string }): SpeechSynthesisVoice | null {
   if (typeof window === "undefined") return null;
   const voices = window.speechSynthesis?.getVoices?.() ?? [];
   if (voices.length === 0) return null;
 
-  const preferred = voices.find((v) => /en(-|_)?(US|GB|AU|CA)?/i.test(v.lang) && !/google/i.test(v.name));
-  return preferred ?? voices.find((v) => /^en/i.test(v.lang)) ?? voices[0] ?? null;
+  if (opts?.voiceURI) {
+    const exact = voices.find((v) => v.voiceURI === opts.voiceURI);
+    if (exact) return exact;
+  }
+
+  const lang = opts?.lang ?? "en-US";
+  const preferred = voices.find((v) => v.lang === lang && !/google/i.test(v.name));
+  return preferred ?? voices.find((v) => v.lang?.startsWith(lang.split("-")[0]) && !/google/i.test(v.name)) ?? voices[0] ?? null;
 }
 
-export function useClinicalTTS(enabled: boolean) {
+export function useClinicalTTS(enabled: boolean, defaults?: { rate?: number; voiceURI?: string | null; lang?: string }) {
   const lastAtRef = useRef<number>(0);
   const lastKeyRef = useRef<string>("");
   const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
@@ -35,7 +51,7 @@ export function useClinicalTTS(enabled: boolean) {
   useEffect(() => {
     if (!isSupported) return;
     const onVoicesChanged = () => {
-      voiceRef.current = pickVoice();
+      voiceRef.current = pickVoice(defaults);
     };
     onVoicesChanged();
     window.speechSynthesis.onvoiceschanged = onVoicesChanged;
@@ -43,7 +59,7 @@ export function useClinicalTTS(enabled: boolean) {
       // Avoid clobbering other listeners; keep minimal.
       window.speechSynthesis.onvoiceschanged = null;
     };
-  }, [isSupported]);
+  }, [isSupported, defaults?.lang, defaults?.voiceURI]);
 
   useEffect(() => {
     if (!isSupported) return;
@@ -68,12 +84,17 @@ export function useClinicalTTS(enabled: boolean) {
       if (key === lastKeyRef.current && now - lastAtRef.current < minIntervalMs) return false;
 
       try {
-        if (opts?.priority === "high") window.speechSynthesis.cancel();
+        const busy = window.speechSynthesis.speaking || window.speechSynthesis.pending;
+        const skipIfBusy = opts?.skipIfBusy ?? (opts?.priority !== "high");
+        if (busy && skipIfBusy && opts?.priority !== "high" && !opts?.cancelPrevious) return false;
+
+        if (opts?.priority === "high" || opts?.cancelPrevious) window.speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(msg);
-        u.rate = 0.95;
+        u.rate = typeof opts?.rate === "number" ? opts.rate : typeof defaults?.rate === "number" ? defaults.rate : 0.95;
         u.pitch = 1.0;
         u.volume = 1.0;
-        u.voice = voiceRef.current ?? pickVoice();
+        u.lang = opts?.lang ?? defaults?.lang ?? "en-US";
+        u.voice = pickVoice({ voiceURI: opts?.voiceURI ?? defaults?.voiceURI ?? null, lang: u.lang }) ?? voiceRef.current;
         window.speechSynthesis.speak(u);
 
         lastAtRef.current = now;
@@ -83,7 +104,7 @@ export function useClinicalTTS(enabled: boolean) {
         return false;
       }
     },
-    [enabled, isSupported]
+    [enabled, isSupported, defaults?.rate, defaults?.lang, defaults?.voiceURI]
   );
 
   const stop = useCallback(() => {

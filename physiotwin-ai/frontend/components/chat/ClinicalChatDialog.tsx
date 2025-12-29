@@ -9,30 +9,43 @@ import { Input } from "@/components/ui/input";
 import { answerClinicalQuestion, type ClinicalChatContext } from "@/components/chat/clinicalChatEngine";
 import { useClinicalTTS } from "@/utils/clinicalTTS";
 import { useSpeechRecognition } from "@/utils/speechRecognition";
+import { useVoiceSettings } from "@/utils/voiceSettings";
 
 type Msg = { id: string; role: "patient" | "assistant"; text: string; ts: string };
 
 export function ClinicalChatDialog(props: { context: ClinicalChatContext; voiceEnabled?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [q, setQ] = useState("");
-  const [voiceReplyEnabled, setVoiceReplyEnabled] = useState(false);
-  const [msgs, setMsgs] = useState<Msg[]>(() => [
-    {
-      id: crypto.randomUUID(),
-      role: "assistant",
-      text: "Hello. I can explain safety stops and how to stay within your clinician-defined safe range.",
-      ts: new Date().toISOString()
-    }
-  ]);
+  const [msgs, setMsgs] = useState<Msg[]>([]);
 
   // Voice output must be controllable. We do NOT auto-read messages.
-  const tts = useClinicalTTS(voiceReplyEnabled && (props.voiceEnabled ?? true));
-  const stt = useSpeechRecognition({ lang: "en-US" });
+  const { settings: voiceSettings } = useVoiceSettings();
+  const voiceEnabled = (props.voiceEnabled ?? true) && voiceSettings.mode !== "off";
+  const tts = useClinicalTTS(voiceEnabled, {
+    rate: voiceSettings.rate,
+    voiceURI: voiceSettings.voiceURI,
+    lang: voiceSettings.lang
+  });
+  const stt = useSpeechRecognition({ lang: voiceSettings.lang || "en-US" });
 
   const suggestions = useMemo(
     () => ["Am I doing this right?", "Why did it stop?", "Can I continue?"],
     []
   );
+
+  useEffect(() => {
+    setMounted(true);
+    // Deterministic first render (avoid hydration mismatches).
+    setMsgs([
+      {
+        id: "welcome",
+        role: "assistant",
+        text: "Hello. I can explain safety stops, positioning guidance, and how to stay within your clinician-defined safe range.",
+        ts: new Date().toISOString()
+      }
+    ]);
+  }, []);
 
   function send(text: string) {
     const trimmed = (text ?? "").trim();
@@ -85,28 +98,53 @@ export function ClinicalChatDialog(props: { context: ClinicalChatContext; voiceE
               <div>
                 <div className="text-sm font-medium">Audio chat</div>
                 <div className="text-xs text-muted-foreground">
-                  Speak to dictate your question. Voice replies are optional and manual.
+                  Hold the mic to dictate your question. Text replies only; voice is manual (“Read aloud”).
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <Button
-                  variant={voiceReplyEnabled ? "default" : "outline"}
-                  onClick={() => setVoiceReplyEnabled((v) => !v)}
-                  disabled={!tts.isSupported}
-                >
-                  <Volume2 className="h-4 w-4" />
-                  Voice replies {voiceReplyEnabled ? "On" : "Off"}
-                </Button>
-                <Button
                   variant={stt.listening ? "default" : "outline"}
+                  onPointerDown={() => {
+                    if (!stt.isSupported) return;
+                    if (!stt.listening) stt.start();
+                  }}
+                  onPointerUp={() => {
+                    if (!stt.isSupported) return;
+                    if (stt.listening) stt.stop();
+                  }}
+                  onPointerCancel={() => {
+                    if (!stt.isSupported) return;
+                    if (stt.listening) stt.stop();
+                  }}
+                  // Fallback click for browsers that don't reliably fire pointer events.
                   onClick={() => (stt.listening ? stt.stop() : stt.start())}
                   disabled={!stt.isSupported}
                 >
                   {stt.listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                  {stt.listening ? "Stop" : "Speak"}
+                  {stt.listening ? "Listening…" : "Hold to speak"}
                 </Button>
               </div>
             </div>
+
+            {stt.isSupported ? (
+              <div className="rounded-2xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between gap-2">
+                  <span>
+                    Language: <span className="font-medium text-foreground">{voiceSettings.lang || "en-US"}</span>
+                  </span>
+                  {stt.error ? <span className="text-rose-700">Mic error: {stt.error}</span> : null}
+                </div>
+                {stt.listening && stt.interimText ? (
+                  <div className="mt-2">
+                    Dictation: <span className="font-medium text-foreground">{stt.interimText}</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                Audio input is not supported in this browser. Please type your question.
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-2">
               {suggestions.map((s) => (
@@ -134,13 +172,23 @@ export function ClinicalChatDialog(props: { context: ClinicalChatContext; voiceE
                       {m.text}
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                      <span>{new Date(m.ts).toLocaleTimeString()}</span>
+                      <span>{mounted ? new Date(m.ts).toLocaleTimeString() : ""}</span>
                       {m.role === "assistant" ? (
                         <button
                           type="button"
                           className="rounded-xl border border-border bg-background px-2 py-1 text-[11px] hover:bg-muted/30 disabled:opacity-50"
-                          disabled={!tts.isSupported || !voiceReplyEnabled}
-                          onClick={() => tts.speak(m.text, { dedupeKey: `chat-read:${m.id}`, minIntervalMs: 0 })}
+                          disabled={!tts.isSupported || !voiceEnabled}
+                          onClick={() =>
+                            tts.speak(m.text, {
+                              dedupeKey: `chat-read:${m.id}`,
+                              minIntervalMs: 0,
+                              rate: voiceSettings.rate,
+                              voiceURI: voiceSettings.voiceURI,
+                              lang: voiceSettings.lang,
+                              cancelPrevious: true,
+                              skipIfBusy: false
+                            })
+                          }
                         >
                           Read aloud
                         </button>
@@ -166,11 +214,21 @@ export function ClinicalChatDialog(props: { context: ClinicalChatContext; voiceE
               <Button type="submit">Send</Button>
             </form>
 
-            {lastAssistant && voiceReplyEnabled ? (
+            {lastAssistant ? (
               <Button
                 variant="outline"
-                onClick={() => tts.speak(lastAssistant.text, { dedupeKey: `chat-last:${lastAssistant.id}`, minIntervalMs: 0 })}
-                disabled={!tts.isSupported}
+                onClick={() =>
+                  tts.speak(lastAssistant.text, {
+                    dedupeKey: `chat-last:${lastAssistant.id}`,
+                    minIntervalMs: 0,
+                    rate: voiceSettings.rate,
+                    voiceURI: voiceSettings.voiceURI,
+                    lang: voiceSettings.lang,
+                    cancelPrevious: true,
+                    skipIfBusy: false
+                  })
+                }
+                disabled={!tts.isSupported || !voiceEnabled}
               >
                 <Volume2 className="h-4 w-4" />
                 Read last answer

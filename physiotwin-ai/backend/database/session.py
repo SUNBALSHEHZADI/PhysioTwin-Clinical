@@ -43,6 +43,16 @@ def _self_migrate_sqlite() -> None:
         _sqlite_add_column(table, "angle_samples_json", "TEXT NOT NULL DEFAULT '[]'")
     if not _sqlite_column_exists(table, "events_json"):
         _sqlite_add_column(table, "events_json", "TEXT NOT NULL DEFAULT '[]'")
+    if not _sqlite_column_exists(table, "review_status"):
+        _sqlite_add_column(table, "review_status", "TEXT NULL")
+    if not _sqlite_column_exists(table, "clinician_note"):
+        _sqlite_add_column(table, "clinician_note", "TEXT NULL")
+    if not _sqlite_column_exists(table, "clinician_outcome"):
+        _sqlite_add_column(table, "clinician_outcome", "TEXT NULL")
+    if not _sqlite_column_exists(table, "reviewed_by"):
+        _sqlite_add_column(table, "reviewed_by", "TEXT NULL")
+    if not _sqlite_column_exists(table, "reviewed_at"):
+        _sqlite_add_column(table, "reviewed_at", "DATETIME NULL")
 
     # Add clinician review columns for risk alerts (reviewable CDSS flags)
     table = "risk_alerts"
@@ -54,6 +64,15 @@ def _self_migrate_sqlite() -> None:
         _sqlite_add_column(table, "reviewed_by", "TEXT NULL")
     if not _sqlite_column_exists(table, "reviewed_at"):
         _sqlite_add_column(table, "reviewed_at", "DATETIME NULL")
+
+    # Add therapist workflow columns for prescriptions
+    table = "exercise_prescriptions"
+    if not _sqlite_column_exists(table, "protocol_version"):
+        _sqlite_add_column(table, "protocol_version", "INTEGER NOT NULL DEFAULT 1")
+    if not _sqlite_column_exists(table, "is_locked"):
+        _sqlite_add_column(table, "is_locked", "INTEGER NOT NULL DEFAULT 0")
+    if not _sqlite_column_exists(table, "template_key"):
+        _sqlite_add_column(table, "template_key", "TEXT NULL")
 
 
 def init_db() -> None:

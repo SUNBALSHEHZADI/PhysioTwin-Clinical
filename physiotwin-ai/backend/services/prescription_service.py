@@ -32,6 +32,9 @@ def get_or_create_prescription(db: Session, patient_id: str, exercise_key: str) 
         rep_limit=d["rep_limit"],
         duration_sec=d["duration_sec"],
         deviation_stop_deg=15,
+        protocol_version=1,
+        is_locked=0,
+        template_key=None,
     )
     db.add(rx)
     db.commit()
@@ -48,15 +51,45 @@ def to_response(rx: ExercisePrescription) -> PrescriptionResponse:
         rep_limit=int(rx.rep_limit),
         duration_sec=int(rx.duration_sec),
         deviation_stop_deg=int(rx.deviation_stop_deg),
+        protocol_version=int(getattr(rx, "protocol_version", 1) or 1),
+        is_locked=bool(getattr(rx, "is_locked", 0) or 0),
+        template_key=getattr(rx, "template_key", None),
     )
 
 
 def update_prescription(db: Session, patient_id: str, exercise_key: str, patch: PrescriptionUpdate) -> PrescriptionResponse:
     rx = get_or_create_prescription(db, patient_id=patient_id, exercise_key=exercise_key)
+    before = dict(
+        safe_min_deg=int(rx.safe_min_deg),
+        safe_max_deg=int(rx.safe_max_deg),
+        rep_limit=int(rx.rep_limit),
+        duration_sec=int(rx.duration_sec),
+        is_locked=int(getattr(rx, "is_locked", 0) or 0),
+        template_key=getattr(rx, "template_key", None),
+        protocol_version=int(getattr(rx, "protocol_version", 1) or 1),
+    )
+
     rx.safe_min_deg = int(patch.safe_min_deg)
     rx.safe_max_deg = int(patch.safe_max_deg)
     rx.rep_limit = int(patch.rep_limit)
     rx.duration_sec = int(patch.duration_sec)
+    if patch.is_locked is not None:
+        rx.is_locked = 1 if bool(patch.is_locked) else 0
+    if patch.template_key is not None:
+        rx.template_key = patch.template_key
+
+    after = dict(
+        safe_min_deg=int(rx.safe_min_deg),
+        safe_max_deg=int(rx.safe_max_deg),
+        rep_limit=int(rx.rep_limit),
+        duration_sec=int(rx.duration_sec),
+        is_locked=int(getattr(rx, "is_locked", 0) or 0),
+        template_key=getattr(rx, "template_key", None),
+    )
+
+    changed = any(before[k] != after[k] for k in after.keys())
+    if changed:
+        rx.protocol_version = int(before["protocol_version"]) + 1
     db.add(rx)
     db.commit()
     db.refresh(rx)

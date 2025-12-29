@@ -19,14 +19,20 @@ import {
 import { cn } from "@/lib/utils";
 import { useClinicalTTS } from "@/utils/clinicalTTS";
 import { ClinicalChatDialog } from "@/components/chat/ClinicalChatDialog";
-import { createCamera, createPose, getDrawingFns, getPoseConnections, loadMediaPipePose } from "@/components/rehab/poseDetector";
+import { VoiceSettingsPanel } from "@/components/voice/VoiceSettingsPanel";
+import { createCamera, createPose, getPoseConnections, loadMediaPipePose } from "@/components/rehab/poseDetector";
 import { angleSpeedDegPerSec, updateFps, type AngleSpeedState, type FpsTracker } from "@/components/rehab/motionAnalyzer";
 import { buildGuidance, determinePhase } from "@/components/rehab/rehabLogic";
 import type { RehabModuleKey } from "@/components/rehab/modules";
+import { useVoiceSettings } from "@/utils/voiceSettings";
+import { getPhaseCoachingPrompt } from "@/components/rehab/coachingPhrases";
+import { LandmarkSmoother, type PoseLandmark } from "@/components/rehab/landmarkSmoother";
+import { computeBodyQuality } from "@/components/rehab/bodyQuality";
 
 type Level = "green" | "yellow" | "red";
 
 type PoseConnections = unknown;
+type PerfMode = "balanced" | "speed" | "accuracy";
 
 async function preflightCameraPermission(): Promise<void> {
   // Forces the browser permission prompt *before* MediaPipe starts.
@@ -116,6 +122,83 @@ function drawAngleLabel(ctx: CanvasRenderingContext2D, x: number, y: number, tex
   ctx.restore();
 }
 
+function drawAngleArc(
+  ctx: CanvasRenderingContext2D,
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  c: { x: number; y: number },
+  tone: "safe" | "warn" | "stop"
+) {
+  const v1 = { x: a.x - b.x, y: a.y - b.y };
+  const v2 = { x: c.x - b.x, y: c.y - b.y };
+  const ang1 = Math.atan2(v1.y, v1.x);
+  const ang2 = Math.atan2(v2.y, v2.x);
+
+  let start = ang1;
+  let end = ang2;
+  let delta = end - start;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  end = start + delta;
+
+  const r = 34;
+  ctx.save();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle =
+    tone === "safe" ? "rgba(16,185,129,0.75)" : tone === "warn" ? "rgba(245,158,11,0.75)" : "rgba(244,63,94,0.75)";
+  ctx.beginPath();
+  ctx.arc(b.x, b.y, r, start, end, delta < 0);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPoseOverlay(params: {
+  ctx: CanvasRenderingContext2D;
+  canvasW: number;
+  canvasH: number;
+  landmarks: PoseLandmark[];
+  connections: any;
+  overlayLabel: { x: number; y: number; text: string; tone: "safe" | "warn" | "stop" } | null;
+  arc?: { a: { x: number; y: number }; b: { x: number; y: number }; c: { x: number; y: number }; tone: "safe" | "warn" | "stop" } | null;
+}) {
+  const { ctx, canvasW, canvasH, landmarks, connections, overlayLabel, arc } = params;
+
+  // Draw connectors (confidence-weighted)
+  if (Array.isArray(connections)) {
+    for (const [i1, i2] of connections as Array<[number, number]>) {
+      const p1 = landmarks[i1];
+      const p2 = landmarks[i2];
+      if (!p1 || !p2) continue;
+      const v = Math.min(p1.visibility ?? 1, p2.visibility ?? 1);
+      const alpha = Math.max(0.08, Math.min(0.9, (v - 0.2) / 0.8));
+      ctx.strokeStyle = `rgba(14,165,164,${alpha.toFixed(3)})`;
+      ctx.lineWidth = 1 + 3 * alpha;
+      ctx.beginPath();
+      ctx.moveTo(p1.x * canvasW, p1.y * canvasH);
+      ctx.lineTo(p2.x * canvasW, p2.y * canvasH);
+      ctx.stroke();
+    }
+  }
+
+  // Draw landmarks (confidence-weighted)
+  for (let i = 0; i < landmarks.length; i++) {
+    const p = landmarks[i]!;
+    const v = p.visibility ?? 1;
+    const alpha = Math.max(0.12, Math.min(0.95, (v - 0.15) / 0.85));
+    const r = 1.5 + 3.0 * alpha;
+    ctx.fillStyle = `rgba(15,23,42,${alpha.toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(p.x * canvasW, p.y * canvasH, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Angle arc (for primary joint)
+  if (arc) drawAngleArc(ctx, arc.a, arc.b, arc.c, arc.tone);
+
+  // Angle label
+  if (overlayLabel) drawAngleLabel(ctx, overlayLabel.x, overlayLabel.y, overlayLabel.text, overlayLabel.tone);
+}
+
 export function PoseSession(props: {
   exerciseKey: string;
   moduleTitle: string;
@@ -140,10 +223,16 @@ export function PoseSession(props: {
   const poseRef = useRef<any | null>(null);
   const poseConnectionsRef = useRef<PoseConnections | null>(null);
   const fpsTrackerRef = useRef<FpsTracker>({ lastFrameAt: 0, ema: 0 });
+  const renderFpsRef = useRef<FpsTracker>({ lastFrameAt: 0, ema: 0 });
   const speedRef = useRef<AngleSpeedState>({ last: null });
+  const smootherRef = useRef<LandmarkSmoother>(new LandmarkSmoother({ minCutoff: 1.35, beta: 0.02, dCutoff: 1.0 }));
+  const latestResultsRef = useRef<PoseResults | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const inferRef = useRef<{ lastAt: number; inFlight: boolean; intervalMs: number }>({ lastAt: 0, inFlight: false, intervalMs: 45 });
 
-  const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const tts = useClinicalTTS(voiceEnabled);
+  const { settings: voiceSettings } = useVoiceSettings();
+  const voiceEnabled = voiceSettings.mode !== "off";
+  const tts = useClinicalTTS(voiceEnabled, { rate: voiceSettings.rate, voiceURI: voiceSettings.voiceURI, lang: voiceSettings.lang });
 
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<"idle" | "starting" | "ready" | "error">("idle");
@@ -174,10 +263,22 @@ export function PoseSession(props: {
   const [aiConfidencePct, setAiConfidencePct] = useState(0);
   const overlayRef = useRef<{ x: number; y: number; text: string; tone: "safe" | "warn" | "stop" } | null>(null);
   const [fps, setFps] = useState<number>(0);
+  const [renderFps, setRenderFps] = useState<number>(0);
   const [videoRes, setVideoRes] = useState<string>("—");
   const [phase, setPhase] = useState<"positioning" | "active">("positioning");
+  const [readiness, setReadiness] = useState({ lighting: false, space: false, clothing: false });
+  const [perfMode, setPerfMode] = useState<PerfMode>("balanced");
+  const [trackingNote, setTrackingNote] = useState<string>("—");
+  const [calibration, setCalibration] = useState<{ state: "idle" | "calibrating" | "done"; startedAt: number | null }>({
+    state: "idle",
+    startedAt: null
+  });
+  const baselineRef = useRef<{ trunkAngleDeg: number | null; distanceRatio: number | null }>({ trunkAngleDeg: null, distanceRatio: null });
+  const lastTrackingNoteRef = useRef<string>("");
 
   const lastSampleAtRef = useRef<number>(0);
+  const lastInferFpsAtRef = useRef<number>(0);
+  const lastRenderFpsAtRef = useRef<number>(0);
   const lastAngleRef = useRef<{ ts: number; angle: number } | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const goodPoseSinceRef = useRef<number | null>(null);
@@ -186,6 +287,7 @@ export function PoseSession(props: {
   const lastFeedbackLevelRef = useRef<Level>("yellow");
   const lastPainWarnAtRef = useRef<number>(0);
   const lastPoseGuideAtRef = useRef<number>(0);
+  const lastPhaseCoachRef = useRef<{ phase: string; at: number } | null>(null);
 
   // Very simple rep counter: count "green" peaks near extension, then back to flexed baseline.
   const [repState, setRepState] = useState<"down" | "up">("down");
@@ -198,9 +300,26 @@ export function PoseSession(props: {
     });
   }
 
-  function speakAndLog(text: string, opts?: { severity?: "info" | "warning" | "stop"; priority?: "normal" | "high"; dedupeKey?: string }) {
+  function speakAndLog(
+    text: string,
+    opts?: { severity?: "info" | "warning" | "stop"; priority?: "normal" | "high"; dedupeKey?: string; kind?: "coaching" | "event" }
+  ) {
+    if (!voiceEnabled || !tts.isSupported) return;
+
+    // Voice mode gating:
+    // - events: only speak key events (stops/warnings/positioning/pain), not continuous coaching
+    // - coaching: allow coaching + events
+    if (voiceSettings.mode === "events" && opts?.kind === "coaching") return;
+
     // Never spam voice prompts every frame. STOP should still interrupt, but not repeat constantly.
-    const spoken = tts.speak(text, { priority: opts?.priority, minIntervalMs: opts?.severity === "stop" ? 6000 : 3500, dedupeKey: opts?.dedupeKey });
+    const spoken = tts.speak(text, {
+      priority: opts?.priority,
+      minIntervalMs: opts?.severity === "stop" ? 6000 : 4500,
+      dedupeKey: opts?.dedupeKey,
+      rate: voiceSettings.rate,
+      voiceURI: voiceSettings.voiceURI,
+      lang: voiceSettings.lang
+    });
     if (spoken) {
       logEvent({
         ts: new Date().toISOString(),
@@ -224,6 +343,11 @@ export function PoseSession(props: {
     setHipAngle(0);
     setAiConfidencePct(0);
     setPhase("positioning");
+    setReadiness({ lighting: false, space: false, clothing: false });
+    setPerfMode("balanced");
+    setTrackingNote("—");
+    setCalibration({ state: "idle", startedAt: null });
+    baselineRef.current = { trunkAngleDeg: null, distanceRatio: null };
     setPainCurrent(painBefore);
     setReportedSwelling(false);
     setReportedDizziness(false);
@@ -231,7 +355,12 @@ export function PoseSession(props: {
     lastAngleRef.current = null;
     fpsTrackerRef.current.lastFrameAt = 0;
     fpsTrackerRef.current.ema = 0;
+    renderFpsRef.current.lastFrameAt = 0;
+    renderFpsRef.current.ema = 0;
     speedRef.current.last = null;
+    smootherRef.current.reset();
+    inferRef.current.lastAt = 0;
+    inferRef.current.inFlight = false;
     goodPoseSinceRef.current = null;
     exerciseActiveRef.current = false;
     startedAtRef.current = null;
@@ -239,6 +368,7 @@ export function PoseSession(props: {
     lastFeedbackLevelRef.current = "yellow";
     lastPoseGuideAtRef.current = 0;
     overlayRef.current = null;
+    lastPhaseCoachRef.current = null;
     try {
       tts.stop();
     } catch {
@@ -280,22 +410,28 @@ export function PoseSession(props: {
     ctx.drawImage(results.image as unknown as CanvasImageSource, 0, 0, canvas.width, canvas.height);
 
     if (results.poseLandmarks) {
-      const { drawConnectors, drawLandmarks } = getDrawingFns();
-      if (poseConnectionsRef.current) {
-        drawConnectors?.(ctx, results.poseLandmarks, poseConnectionsRef.current as any, { color: "#0ea5a4", lineWidth: 3 });
-      }
-      drawLandmarks?.(ctx, results.poseLandmarks, { color: "#0f172a", lineWidth: 1, radius: 3 });
-
-      // Draw joint angle label near the joint (real-time)
-      const o = overlayRef.current;
-      if (o) drawAngleLabel(ctx, o.x, o.y, o.text, o.tone);
+      drawPoseOverlay({
+        ctx,
+        canvasW: canvas.width,
+        canvasH: canvas.height,
+        landmarks: results.poseLandmarks as unknown as PoseLandmark[],
+        connections: poseConnectionsRef.current,
+        overlayLabel: overlayRef.current,
+        arc: (results as any).__arc ?? null
+      });
     }
     ctx.restore();
   }
 
   function onResults(results: PoseResults) {
-    const lm = results.poseLandmarks;
-    if (!lm) return;
+    latestResultsRef.current = results;
+    const lmRaw = results.poseLandmarks as unknown as PoseLandmark[] | undefined;
+    if (!lmRaw) return;
+
+    const nowPerf = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const lm = smootherRef.current.smooth(lmRaw, nowPerf, 0.28);
+    // Ensure drawing uses smoothed points (reduces jitter visually).
+    (results as any).poseLandmarks = lm;
 
     // Use RIGHT side by default; if low confidence, use LEFT.
     const rHip = lm[24];
@@ -367,7 +503,10 @@ export function PoseSession(props: {
     // FPS estimate (EMA), updated ~2Hz to avoid render churn.
     {
       const fpsEma = updateFps(fpsTrackerRef.current, nowMs);
-      if (fpsEma && nowMs - lastSampleAtRef.current >= 500) setFps(Math.round(fpsEma));
+      if (fpsEma && nowMs - lastInferFpsAtRef.current >= 500) {
+        lastInferFpsAtRef.current = nowMs;
+        setFps(Math.round(fpsEma));
+      }
     }
 
     updateVideoDetails();
@@ -375,17 +514,48 @@ export function PoseSession(props: {
     // Movement speed (deg/sec) for phase detection + physiotherapist-style coaching.
     const speedDegPerSec = angleSpeedDegPerSec(speedRef.current, nowMs, primaryAngleDeg);
 
-    // Pose quality gate: if patient is not well-positioned / low confidence, guide instead of hard-stopping.
-    const poseOk = confidencePct >= 60;
-    if (!poseOk) {
+    // Module key used by coaching + quality checks.
+    const moduleKey: RehabModuleKey =
+      props.exerciseKey === "shoulder_flexion" ? "shoulder" : props.exerciseKey === "elbow_flexion" ? "arm" : "knee";
+
+    // Body quality gate: full body visibility + centering + distance.
+    const quality = computeBodyQuality({ landmarks: lm, module: moduleKey, minVis: 0.45, minConfidencePct: 60 });
+    if (quality.message !== lastTrackingNoteRef.current) {
+      lastTrackingNoteRef.current = quality.message;
+      setTrackingNote(quality.message);
+    }
+
+    // Calibration step (2s standstill) once tracking quality is good.
+    if (calibration.state !== "done" && quality.ok) {
+      const still = (speedDegPerSec ?? 0) < 20;
+      if (still) {
+        if (calibration.state === "idle") {
+          setCalibration({ state: "calibrating", startedAt: nowMs });
+          setMessage("Calibration: please stand still for 2 seconds.");
+          speakAndLog("Calibration. Please stand still for two seconds.", { severity: "info", dedupeKey: "calib_start", kind: "event" });
+        } else if (calibration.state === "calibrating" && calibration.startedAt && nowMs - calibration.startedAt >= 2000) {
+          baselineRef.current.trunkAngleDeg = compAngleDeg;
+          baselineRef.current.distanceRatio = quality.distance.ratio;
+          setCalibration({ state: "done", startedAt: null });
+          setMessage("Calibration complete. Begin movement slowly.");
+          speakAndLog("Calibration complete. Begin movement slowly.", { severity: "info", dedupeKey: "calib_done", kind: "event" });
+        }
+      } else if (calibration.state === "calibrating") {
+        setCalibration({ state: "idle", startedAt: null });
+      }
+    }
+
+    const baselineTrunk = baselineRef.current.trunkAngleDeg;
+    const baselineCompensation = baselineTrunk != null ? Math.abs(compAngleDeg - baselineTrunk) > 12 : false;
+
+    // Pose quality gate: guide instead of scoring if capture quality is poor (or calibration not finished).
+    if (!quality.ok || calibration.state !== "done") {
       setPhase("positioning");
       goodPoseSinceRef.current = null;
       exerciseActiveRef.current = false;
       setLevel("yellow");
 
-      const avgX = (hip.x + shoulder.x) / 2;
-      const direction = avgX < 0.38 ? "to the right" : avgX > 0.62 ? "to the left" : "to the center";
-      const helpMsg = `Position guidance: please move slightly ${direction} and ensure the full limb is visible.`;
+      const helpMsg = calibration.state !== "done" ? "Calibration in progress. Please stand still." : `Position guidance: ${quality.message}`;
       setMessage(helpMsg);
       if (nowMs - lastPoseGuideAtRef.current > 6500) {
         lastPoseGuideAtRef.current = nowMs;
@@ -394,9 +564,9 @@ export function PoseSession(props: {
           severity: "warning",
           type: "position_guidance",
           message: helpMsg,
-          data: { ai_confidence_pct: confidencePct, avg_x: Number(avgX.toFixed(2)) }
+          data: { ai_confidence_pct: confidencePct, distance_ratio: quality.distance.ratio, missing: quality.missing }
         });
-        speakAndLog(`Please step back slightly and move ${direction}.`, { severity: "warning", dedupeKey: "pose_position" });
+        speakAndLog(helpMsg, { severity: "warning", dedupeKey: "pose_position", kind: "event" });
       }
 
       // Still draw skeleton/label to help positioning
@@ -414,6 +584,13 @@ export function PoseSession(props: {
           text: `${jointName}: ${Math.round(primaryAngleDeg)}°`,
           tone: "warn"
         };
+        // Angle arc near the primary joint
+        (results as any).__arc = {
+          a: { x: (props.exerciseKey === "shoulder_flexion" ? hip.x : props.exerciseKey === "elbow_flexion" ? shoulder.x : hip.x) * w, y: (props.exerciseKey === "shoulder_flexion" ? hip.y : props.exerciseKey === "elbow_flexion" ? shoulder.y : hip.y) * h },
+          b: { x: joint.x * w, y: joint.y * h },
+          c: { x: (props.exerciseKey === "shoulder_flexion" ? elbow.x : props.exerciseKey === "elbow_flexion" ? wrist.x : ank.x) * w, y: (props.exerciseKey === "shoulder_flexion" ? elbow.y : props.exerciseKey === "elbow_flexion" ? wrist.y : ank.y) * h },
+          tone: "warn"
+        };
       }
 
       draw(results);
@@ -428,9 +605,6 @@ export function PoseSession(props: {
     }
 
     // Rehab-specific guidance (calm, directional, phase-aware)
-    const moduleKey: RehabModuleKey =
-      props.exerciseKey === "shoulder_flexion" ? "shoulder" : props.exerciseKey === "elbow_flexion" ? "arm" : "knee";
-
     const phaseNow = determinePhase({
       module: moduleKey,
       angleDeg: primaryAngleDeg,
@@ -451,29 +625,36 @@ export function PoseSession(props: {
       avgY: avgY2,
       phase: phaseNow,
       statusLevel: fb.level,
+      angleDeg: primaryAngleDeg,
+      safeMinDeg: targets.safeMinDeg,
+      safeMaxDeg: targets.safeMaxDeg,
+      idealMinDeg: targets.idealMinDeg,
+      idealMaxDeg: targets.idealMaxDeg,
       deviationDeg,
       deviationStopDeg: props.prescription.deviationStopDeg,
       speedDegPerSec,
       asymmetryDeg: null,
-      compensation: !!fb.flags?.compensation
+      compensation: !!fb.flags?.compensation || baselineCompensation
     });
 
-    // Prepare on-canvas angle label near the relevant joint
-    const canvas = canvasRef.current;
+    // Prepare on-canvas angle label + arc when confidence is adequate (reduces visual noise).
     const video = videoRef.current;
-    if (canvas && video) {
+    if (video && confidencePct >= 55) {
       const w = video.videoWidth || 640;
       const h = video.videoHeight || 480;
-      const joint =
-        props.exerciseKey === "shoulder_flexion" ? shoulder : props.exerciseKey === "elbow_flexion" ? elbow : knee;
+      const joint = props.exerciseKey === "shoulder_flexion" ? shoulder : props.exerciseKey === "elbow_flexion" ? elbow : knee;
       const jointName = props.exerciseKey === "shoulder_flexion" ? "Shoulder" : props.exerciseKey === "elbow_flexion" ? "Elbow" : "Knee";
       const tone = fb.level === "green" ? "safe" : fb.level === "yellow" ? "warn" : "stop";
-      overlayRef.current = {
-        x: joint.x * w,
-        y: joint.y * h,
-        text: `${jointName}: ${Math.round(primaryAngleDeg)}°`,
+      overlayRef.current = { x: joint.x * w, y: joint.y * h, text: `${jointName}: ${Math.round(primaryAngleDeg)}°`, tone };
+      (results as any).__arc = {
+        a: { x: (props.exerciseKey === "shoulder_flexion" ? hip.x : props.exerciseKey === "elbow_flexion" ? shoulder.x : hip.x) * w, y: (props.exerciseKey === "shoulder_flexion" ? hip.y : props.exerciseKey === "elbow_flexion" ? shoulder.y : hip.y) * h },
+        b: { x: joint.x * w, y: joint.y * h },
+        c: { x: (props.exerciseKey === "shoulder_flexion" ? elbow.x : props.exerciseKey === "elbow_flexion" ? wrist.x : ank.x) * w, y: (props.exerciseKey === "shoulder_flexion" ? elbow.y : props.exerciseKey === "elbow_flexion" ? wrist.y : ank.y) * h },
         tone
       };
+    } else {
+      overlayRef.current = null;
+      (results as any).__arc = null;
     }
 
     // Draw after computing overlay to keep canvas labels synchronized.
@@ -488,8 +669,24 @@ export function PoseSession(props: {
     if (guidance.voice) {
       speakAndLog(guidance.voice, {
         severity: fb.level === "red" ? "stop" : fb.level === "yellow" ? "warning" : "info",
-        dedupeKey: `rehab:${guidance.voice}`
+        dedupeKey: `rehab:${guidance.voice}`,
+        kind: fb.level === "green" ? "coaching" : "event"
       });
+    }
+
+    // Coaching mood: phase cues when stable & safe (varied phrasing, rate-limited).
+    if (!guidance.pauseAnalysis && voiceSettings.mode === "coaching" && fb.level === "green") {
+      const last = lastPhaseCoachRef.current;
+      const now = Date.now();
+      const samePhase = last?.phase === phaseNow;
+      const tooSoon = last ? now - last.at < 9000 : false;
+      if (!samePhase && !tooSoon) {
+        const p = getPhaseCoachingPrompt({ module: moduleKey, phase: phaseNow, repsCompleted });
+        if (p?.voice) {
+          speakAndLog(p.voice, { severity: "info", dedupeKey: p.dedupeKey, kind: "coaching" });
+          lastPhaseCoachRef.current = { phase: phaseNow, at: now };
+        }
+      }
     }
     setAiConfidencePct(confidencePct);
     setAngles((prev: number[]) => {
@@ -587,6 +784,20 @@ export function PoseSession(props: {
   async function start() {
     setError(null);
     setCameraHelp(null);
+
+    // Readiness gate (reduces false stops / low-confidence prompts).
+    const readyOk = readiness.lighting && readiness.space && readiness.clothing;
+    if (!readyOk) {
+      setMessage("Before starting, confirm the readiness checks below for best tracking quality.");
+      speakAndLog("Before starting, please confirm the readiness checks below for best tracking quality.", {
+        severity: "info",
+        dedupeKey: "readiness_gate",
+        kind: "event"
+      });
+      setStatus("ready");
+      return;
+    }
+
     setStatus("starting");
     try {
       if (typeof window === "undefined") throw new Error("Camera is only available in the browser.");
@@ -613,10 +824,36 @@ export function PoseSession(props: {
       const pose = createPose(onResults);
       poseRef.current = pose;
 
-      const cam = createCamera(videoRef.current, async () => {
-        if (!poseRef.current) return;
-        await poseRef.current.send({ image: videoRef.current as HTMLVideoElement });
-      });
+      // Performance presets (MVP): trade accuracy vs latency.
+      const preset =
+        perfMode === "speed"
+          ? { w: 640, h: 480, inferFps: 28 }
+          : perfMode === "accuracy"
+            ? { w: 960, h: 720, inferFps: 18 }
+            : { w: 720, h: 540, inferFps: 24 };
+
+      inferRef.current.intervalMs = Math.round(1000 / preset.inferFps);
+      inferRef.current.lastAt = 0;
+      inferRef.current.inFlight = false;
+
+      const cam = createCamera(
+        videoRef.current,
+        async () => {
+          if (!poseRef.current || !videoRef.current) return;
+          const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+          if (inferRef.current.inFlight) return;
+          if (inferRef.current.lastAt && now - inferRef.current.lastAt < inferRef.current.intervalMs) return;
+          inferRef.current.lastAt = now;
+          inferRef.current.inFlight = true;
+          try {
+            await poseRef.current.send({ image: videoRef.current as HTMLVideoElement });
+          } finally {
+            inferRef.current.inFlight = false;
+          }
+        },
+        preset.w,
+        preset.h
+      );
       cameraRef.current = cam;
       await cam.start();
 
@@ -624,6 +861,9 @@ export function PoseSession(props: {
       setRunning(true);
       startedAtRef.current = Date.now();
       stoppedBySafetyRef.current = false;
+      smootherRef.current.reset();
+      baselineRef.current = { trunkAngleDeg: null, distanceRatio: null };
+      setCalibration({ state: "idle", startedAt: null });
       logEvent({ ts: new Date().toISOString(), severity: "info", type: "session_start", message: "Session started." });
     } catch (e) {
       setStatus("error");
@@ -643,6 +883,13 @@ export function PoseSession(props: {
     } catch {
       // ignore
     }
+    cameraRef.current = null;
+    poseRef.current = null;
+    latestResultsRef.current = null;
+    inferRef.current.inFlight = false;
+    inferRef.current.lastAt = 0;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
   }
 
   useEffect(() => {
@@ -651,6 +898,31 @@ export function PoseSession(props: {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Smooth render loop: draw at display refresh rate using the latest pose results.
+  useEffect(() => {
+    if (!running) return;
+    let alive = true;
+    const tick = () => {
+      if (!alive) return;
+      const r = latestResultsRef.current;
+      if (r) draw(r);
+      const nowMs = Date.now();
+      const fpsEma = updateFps(renderFpsRef.current, nowMs);
+      if (fpsEma && nowMs - lastRenderFpsAtRef.current >= 500) {
+        lastRenderFpsAtRef.current = nowMs;
+        setRenderFps(Math.round(fpsEma));
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      alive = false;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
 
   const avgAngle = useMemo(() => {
     if (angles.length === 0) return 0;
@@ -733,12 +1005,20 @@ export function PoseSession(props: {
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Performance</div>
-              <div className="text-sm font-medium">{fps ? `${fps} FPS` : "—"} • {aiConfidencePct}% confidence</div>
+              <div className="text-sm font-medium">
+                {renderFps ? `${renderFps} render FPS` : "—"} • {fps ? `${fps} infer FPS` : "—"} • {aiConfidencePct}% confidence
+              </div>
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Session phase</div>
-              <div className="text-sm font-medium">{phase === "positioning" ? "Positioning" : "Active guidance"}</div>
+              <div className="text-sm font-medium">
+                {calibration.state !== "done" ? "Calibration" : phase === "positioning" ? "Positioning" : "Active guidance"}
+              </div>
             </div>
+          </div>
+
+          <div className="mt-2 rounded-2xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Tracking:</span> {trackingNote}
           </div>
 
           {error ? (
@@ -756,6 +1036,67 @@ export function PoseSession(props: {
                   <li key={s}>{s}</li>
                 ))}
               </ul>
+            </div>
+          ) : null}
+
+          {!running ? (
+            <div className="mt-4 rounded-2xl border border-border bg-background p-4">
+              <div className="text-sm font-medium">Readiness checklist</div>
+              <div className="mt-1 text-xs text-muted-foreground">Improves tracking accuracy and reduces false stops.</div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={readiness.lighting}
+                    onChange={(e) => setReadiness((r) => ({ ...r, lighting: e.target.checked }))}
+                    className="mt-1"
+                  />
+                  <span>
+                    Good lighting
+                    <div className="text-xs text-muted-foreground">Face the light, avoid backlight.</div>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={readiness.space}
+                    onChange={(e) => setReadiness((r) => ({ ...r, space: e.target.checked }))}
+                    className="mt-1"
+                  />
+                  <span>
+                    Full body visible
+                    <div className="text-xs text-muted-foreground">Step back until head + feet are visible.</div>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={readiness.clothing}
+                    onChange={(e) => setReadiness((r) => ({ ...r, clothing: e.target.checked }))}
+                    className="mt-1"
+                  />
+                  <span>
+                    Clothing allows tracking
+                    <div className="text-xs text-muted-foreground">Avoid long coats; keep joints visible.</div>
+                  </span>
+                </label>
+              </div>
+
+              <div className="mt-4 grid gap-2">
+                <div className="text-sm font-medium">Performance mode</div>
+                <div className="text-xs text-muted-foreground">
+                  Speed improves responsiveness. Accuracy increases resolution but may lower FPS on older devices.
+                </div>
+                <select
+                  className="h-11 rounded-2xl border border-border bg-background px-4 text-sm"
+                  value={perfMode}
+                  onChange={(e) => setPerfMode(e.target.value as PerfMode)}
+                >
+                  <option value="balanced">Balanced</option>
+                  <option value="speed">High speed</option>
+                  <option value="accuracy">High accuracy</option>
+                </select>
+              </div>
             </div>
           ) : null}
 
@@ -845,23 +1186,7 @@ export function PoseSession(props: {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-border bg-background p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-medium">Voice guidance</div>
-                  <div className="text-xs text-muted-foreground">
-                    {tts.isSupported ? "Enabled voice prompts for safety and corrections." : "Voice not supported in this browser."}
-                  </div>
-                </div>
-                <Button
-                  variant={voiceEnabled ? "default" : "outline"}
-                  onClick={() => setVoiceEnabled((v) => !v)}
-                  disabled={!tts.isSupported}
-                >
-                  {voiceEnabled ? "On" : "Off"}
-                </Button>
-              </div>
-            </div>
+            <VoiceSettingsPanel compact />
 
             <div className="rounded-2xl border border-border bg-background p-4">
               <div className="flex items-center justify-between gap-3">
