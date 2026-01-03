@@ -14,8 +14,6 @@ import { Input } from "@/components/ui/input";
 
 type Rx = Awaited<ReturnType<typeof api.getTherapistPrescription>>;
 
-type SessionExport = Awaited<ReturnType<typeof api.exportSessionJson>>;
-
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -56,25 +54,29 @@ function Sparkline(props: { values: number[]; width?: number; height?: number })
   );
 }
 
-function draftSessionNote(exportJson: SessionExport): string {
-  const s: any = exportJson?.session ?? {};
-  const angles: Array<any> = s.angle_samples ?? [];
-  const events: Array<any> = s.events ?? [];
-  const primary = angles.map((a) => Number(a.primary_angle_deg ?? 0)).filter((n) => Number.isFinite(n));
-  const min = primary.length ? Math.min(...primary) : null;
-  const max = primary.length ? Math.max(...primary) : null;
-  const stopCount = events.filter((e) => String(e?.severity).toLowerCase() === "stop").length;
-  const warnCount = events.filter((e) => String(e?.severity).toLowerCase() === "warning").length;
-
+function draftSessionNoteFromList(session: {
+  id: string;
+  created_at: string;
+  exercise_key: string;
+  pain_before: number;
+  pain_after: number;
+  reps_completed: number;
+  avg_knee_angle_deg: number;
+  risk_events: number;
+  adherence_score: number;
+  ai_confidence_pct: number;
+}): string {
   return [
     "PhysioTwin Clinical — Session Note Draft (Decision support only)",
     "",
-    `Date/time: ${s.created_at ?? "-"}`,
-    `Exercise: ${s.exercise_key ?? "-"}`,
-    `Pain (before/after): ${s.pain_before ?? "-"} / ${s.pain_after ?? "-"}`,
-    `Reps completed: ${s.reps_completed ?? "-"}`,
-    `Angle range observed (primary): ${min !== null ? `${min.toFixed(1)}°` : "-"} to ${max !== null ? `${max.toFixed(1)}°` : "-"}`,
-    `Events: ${warnCount} warnings, ${stopCount} stops`,
+    `Date/time: ${new Date(session.created_at).toLocaleString()}`,
+    `Exercise: ${session.exercise_key}`,
+    `Pain (before/after): ${session.pain_before} / ${session.pain_after}`,
+    `Reps completed: ${session.reps_completed}`,
+    `Avg angle (primary): ${Math.round(session.avg_knee_angle_deg)}°`,
+    `Risk events: ${session.risk_events}`,
+    `Adherence score: ${session.adherence_score}`,
+    `AI confidence: ${session.ai_confidence_pct}%`,
     "",
     "Clinician interpretation:",
     "- ",
@@ -112,7 +114,6 @@ export default function TherapistPatientDetailsPage() {
   const [rxDraft, setRxDraft] = useState<Record<string, Partial<Rx>>>({});
   const [loading, setLoading] = useState(true);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [selectedExport, setSelectedExport] = useState<SessionExport | null>(null);
   const [note, setNote] = useState<string>("");
   const [outcome, setOutcome] = useState<string>("continue");
   const [savingNote, setSavingNote] = useState(false);
@@ -170,18 +171,12 @@ export default function TherapistPatientDetailsPage() {
     );
   }
 
-  async function openSession(sessionId: string) {
+  function openSession(sessionId: string) {
     setSelectedSessionId(sessionId);
-    setSelectedExport(null);
     setErr(null);
-    try {
-      const j = await api.exportSessionJson(sessionId);
-      setSelectedExport(j);
-      setNote(draftSessionNote(j));
-      setOutcome("continue");
-    } catch (e) {
-      setErr((e as Error)?.message ?? "Failed to load session.");
-    }
+    const s = sessions.find((x) => x.id === sessionId);
+    setNote(s ? draftSessionNoteFromList(s as any) : "");
+    setOutcome("continue");
   }
 
   async function exportPdf(sessionId: string) {
@@ -474,67 +469,44 @@ export default function TherapistPatientDetailsPage() {
                     Close
                   </Button>
                 </div>
+                <div className="mt-3 space-y-3">
+                  <div className="rounded-2xl border border-border bg-background p-3 text-xs text-muted-foreground">
+                    Angle samples + event timeline are disabled because JSON export was removed from the therapist UI. You can still export the PDF and
+                    write a clinical note below.
+                  </div>
 
-                {selectedExport ? (
-                  <div className="mt-3 space-y-3">
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-2xl border border-border bg-background p-3">
-                        <div className="text-xs text-muted-foreground">Angle trend</div>
-                        <div className="mt-2">
-                          <Sparkline
-                            values={((selectedExport.session as any)?.angle_samples ?? []).map((a: any) => Number(a.primary_angle_deg ?? 0))}
-                          />
-                        </div>
+                  <div className="grid gap-2">
+                    <div className="text-sm font-medium">Clinician note</div>
+                    <textarea
+                      className="min-h-[180px] w-full rounded-2xl border border-border bg-background p-3 text-sm"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                    />
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="text-xs text-muted-foreground">Outcome</div>
+                        <select
+                          className="h-10 rounded-2xl border border-border bg-background px-3 text-sm"
+                          value={outcome}
+                          onChange={(e) => setOutcome(e.target.value)}
+                        >
+                          <option value="continue">Continue</option>
+                          <option value="pause">Pause</option>
+                          <option value="modify">Modify protocol</option>
+                          <option value="follow_up">Follow-up</option>
+                        </select>
                       </div>
-                      <div className="rounded-2xl border border-border bg-background p-3 sm:col-span-2">
-                        <div className="text-xs text-muted-foreground">Event timeline (excerpt)</div>
-                        <div className="mt-2 max-h-28 space-y-1 overflow-auto text-xs">
-                          {(((selectedExport.session as any)?.events ?? []) as any[]).slice(0, 40).map((e, idx) => (
-                            <div key={idx} className="flex items-center justify-between gap-2">
-                              <span className="text-muted-foreground">{String(e.ts ?? "").slice(11, 19) || "-"}</span>
-                              <span className="font-medium">{e.severity}</span>
-                              <span className="flex-1 truncate">{e.message}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-2">
-                      <div className="text-sm font-medium">Clinician note (draft)</div>
-                      <textarea
-                        className="min-h-[180px] w-full rounded-2xl border border-border bg-background p-3 text-sm"
-                        value={note}
-                        onChange={(e) => setNote(e.target.value)}
-                      />
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="text-xs text-muted-foreground">Outcome</div>
-                          <select
-                            className="h-10 rounded-2xl border border-border bg-background px-3 text-sm"
-                            value={outcome}
-                            onChange={(e) => setOutcome(e.target.value)}
-                          >
-                            <option value="continue">Continue</option>
-                            <option value="pause">Pause</option>
-                            <option value="modify">Modify protocol</option>
-                            <option value="follow_up">Follow-up</option>
-                          </select>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" onClick={() => saveSessionReview("draft")} disabled={savingNote}>
-                            Save draft
-                          </Button>
-                          <Button onClick={() => saveSessionReview("final")} disabled={savingNote}>
-                            Finalize review
-                          </Button>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" onClick={() => saveSessionReview("draft")} disabled={savingNote}>
+                          Save draft
+                        </Button>
+                        <Button onClick={() => saveSessionReview("final")} disabled={savingNote}>
+                          Finalize review
+                        </Button>
                       </div>
                     </div>
                   </div>
-                ) : (
-                  <div className="mt-3 text-sm text-muted-foreground">Loading session details…</div>
-                )}
+                </div>
               </div>
             ) : null}
           </CardContent>
