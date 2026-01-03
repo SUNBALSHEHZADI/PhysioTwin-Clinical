@@ -78,11 +78,6 @@ export const api = {
       }>;
     }>("/patient/sessions");
   },
-  async exportSessionJson(session_id: string) {
-    return request<{ disclaimer: string; session: Record<string, unknown> }>(
-      `/sessions/${encodeURIComponent(session_id)}/export.json`
-    );
-  },
   async exportSessionPdf(session_id: string) {
     return request<{ filename: string; content_type: string; base64: string }>(
       `/sessions/${encodeURIComponent(session_id)}/export.pdf`
