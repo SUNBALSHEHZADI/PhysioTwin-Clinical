@@ -85,10 +85,6 @@ export default async function ExerciseLandingPage({ params }: { params: Promise<
                 <li key={b}>{b}</li>
               ))}
             </ul>
-            <div className="mt-3 text-xs text-muted-foreground">
-              Tip: Replace this placeholder image with your DALL·E hero image by saving it as{" "}
-              <span className="font-medium text-foreground">{m.imageSrc}</span>.
-            </div>
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row">
