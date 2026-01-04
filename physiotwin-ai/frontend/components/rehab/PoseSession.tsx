@@ -280,6 +280,18 @@ export function PoseSession(props: {
   const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const sideLockRef = useRef<{ side: Side | null; lastSwitchAt: number }>({ side: null, lastSwitchAt: 0 });
   const qualityOkFramesRef = useRef<number>(0);
+
+  // Frame quality sampling (lighting/contrast). Gates analysis to reduce false flags.
+  const frameProbeRef = useRef<{ canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null>(null);
+  const lastFrameQualityAtRef = useRef<number>(0);
+  const lightingOkFramesRef = useRef<number>(0);
+  const lastLightingNoteRef = useRef<string>("");
+  const lastLightingVoiceAtRef = useRef<number>(0);
+
+  // Persistence counters for safety conditions (reduces false stops due to single-frame spikes).
+  const jerkFramesRef = useRef<number>(0);
+  const outOfRangeFramesRef = useRef<number>(0);
+
   const levelHoldRef = useRef<{ proposed: Level | null; since: number; committed: Level }>({ proposed: null, since: 0, committed: "yellow" });
   const highlightRef = useRef<{ connections: Array<[number, number]>; indices: number[]; tone: "safe" | "warn" | "stop" } | null>(null);
   const repLastAtRef = useRef<number>(0);
@@ -333,6 +345,7 @@ export function PoseSession(props: {
   const [perfMode, setPerfMode] = useState<PerfMode>("balanced");
   const [facingMode, setFacingMode] = useState<CameraFacingMode>("user");
   const [trackingNote, setTrackingNote] = useState<string>("-");
+  const [lightingNote, setLightingNote] = useState<string>("-");
   const [tempoEnabled, setTempoEnabled] = useState(true);
   const [tempoPreset, setTempoPreset] = useState<"slow" | "standard" | "fast">("standard");
   const [tempoUi, setTempoUi] = useState<{ phase: "setup" | "raise" | "hold" | "lower" | "rest"; progress: number }>({
@@ -538,6 +551,50 @@ export function PoseSession(props: {
     ctx.restore();
   }
 
+  function ensureProbe(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+    if (typeof document === "undefined") return null;
+    if (frameProbeRef.current) return frameProbeRef.current;
+    const c = document.createElement("canvas");
+    c.width = 64;
+    c.height = 64;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    frameProbeRef.current = { canvas: c, ctx };
+    return frameProbeRef.current;
+  }
+
+  function sampleFrameQuality(video: HTMLVideoElement): { ok: boolean; message: string; mean: number; std: number } {
+    const probe = ensureProbe();
+    if (!probe) return { ok: true, message: "Lighting is good.", mean: 128, std: 64 };
+
+    const { canvas, ctx } = probe;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = img.data;
+
+    // Luma mean/std (BT.709-ish). Downsampled so it's very fast.
+    let sum = 0;
+    let sumSq = 0;
+    const n = canvas.width * canvas.height;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i] ?? 0;
+      const g = data[i + 1] ?? 0;
+      const b = data[i + 2] ?? 0;
+      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      sum += y;
+      sumSq += y * y;
+    }
+    const mean = sum / n;
+    const variance = Math.max(0, sumSq / n - mean * mean);
+    const std = Math.sqrt(variance);
+
+    // Conservative thresholds for webcams + phones.
+    if (mean < 60) return { ok: false, message: "Lighting is low. Face a light source or move to a brighter area.", mean, std };
+    if (mean > 205) return { ok: false, message: "Lighting is too bright. Avoid backlight and reduce glare.", mean, std };
+    if (std < 18) return { ok: false, message: "Low contrast. Improve lighting and avoid strong backlight.", mean, std };
+    return { ok: true, message: "Lighting is good.", mean, std };
+  }
+
   function onResults(results: PoseResults) {
     latestResultsRef.current = results;
     const lmRaw = results.poseLandmarks as unknown as PoseLandmark[] | undefined;
@@ -698,6 +755,28 @@ export function PoseSession(props: {
 
     updateVideoDetails();
 
+    // Lighting/contrast gate: sample at ~2Hz to avoid overhead and UI churn.
+    {
+      const v = videoRef.current;
+      if (v && v.videoWidth && v.videoHeight && nowMs - lastFrameQualityAtRef.current >= 500) {
+        lastFrameQualityAtRef.current = nowMs;
+        const q = sampleFrameQuality(v);
+        if (q.ok) lightingOkFramesRef.current = Math.min(20, lightingOkFramesRef.current + 1);
+        else lightingOkFramesRef.current = 0;
+
+        if (q.message !== lastLightingNoteRef.current) {
+          lastLightingNoteRef.current = q.message;
+          setLightingNote(q.message);
+        }
+
+        const lightingStableOk = lightingOkFramesRef.current >= 3;
+        if (!lightingStableOk && nowMs - lastLightingVoiceAtRef.current > 10_000) {
+          lastLightingVoiceAtRef.current = nowMs;
+          speakAndLog(q.message, { severity: "warning", dedupeKey: "lighting_gate", kind: "event" });
+        }
+      }
+    }
+
     // Movement speed (deg/sec) for phase detection + physiotherapist-style coaching.
     const speedDegPerSec = angleSpeedDegPerSec(speedRef.current, nowMs, primaryAngleDeg);
 
@@ -739,8 +818,9 @@ export function PoseSession(props: {
     const baselineTrunk = baselineRef.current.trunkAngleDeg;
     const baselineCompensation = baselineTrunk != null ? Math.abs(compAngleDeg - baselineTrunk) > 12 : false;
 
-    // Pose quality gate: guide instead of scoring if capture quality is poor (or calibration not finished).
-    if (!qualityStableOk || calibration.state !== "done") {
+    // Pose + lighting gate: guide instead of scoring if capture quality is poor (or calibration not finished).
+    const lightingStableOk = lightingOkFramesRef.current >= 3;
+    if (!qualityStableOk || !lightingStableOk || calibration.state !== "done") {
       setPhase("positioning");
       goodPoseSinceRef.current = null;
       exerciseActiveRef.current = false;
@@ -749,7 +829,9 @@ export function PoseSession(props: {
       const helpMsg =
         calibration.state !== "done"
           ? "Calibration in progress. Please stand still."
-          : `Adjust position: ${quality.message}${confidencePct < 60 ? " Improve lighting and reduce background clutter." : ""}`;
+          : !lightingStableOk
+            ? `Improve capture quality: ${lastLightingNoteRef.current || "Adjust lighting and reduce glare."}`
+            : `Adjust position: ${quality.message}${confidencePct < 60 ? " Improve lighting and reduce background clutter." : ""}`;
       setMessage(helpMsg);
       if (nowMs - lastPoseGuideAtRef.current > 6500) {
         lastPoseGuideAtRef.current = nowMs;
@@ -952,7 +1034,15 @@ export function PoseSession(props: {
 
     // UI/voice hysteresis: prevent green/yellow flicker. Red should show immediately.
     const desired: Level = fb.level;
-    const holdMs = desired === "red" ? 0 : 350;
+    const committed = levelHoldRef.current.committed;
+    const holdMs =
+      desired === "red"
+        ? 0
+        : committed === "yellow" && desired === "green"
+          ? 650
+          : committed === "green" && desired === "yellow"
+            ? 250
+            : 350;
     if (desired === "red") {
       levelHoldRef.current = { proposed: null, since: 0, committed: "red" };
       setLevel("red");
@@ -1020,13 +1110,20 @@ export function PoseSession(props: {
       });
     }
 
-    // Sudden jerky movement (hard stop)
-    if (exerciseActiveRef.current && Math.abs(speedDegPerSec ?? 0) > 160) {
-      void stopBySafety("Sudden movement detected. Stop and rest.", "Stop now. Rest.", {
-        speed_deg_per_sec: Math.round(Math.abs(speedDegPerSec ?? 0)),
-        primary_angle_deg: Number(primaryAngleDeg.toFixed(1))
-      });
-      return;
+    // Sudden jerky movement (hard stop). Use persistence to avoid false stops from single-frame spikes.
+    if (exerciseActiveRef.current) {
+      const speedAbs = Math.abs(speedDegPerSec ?? 0);
+      if (speedAbs > 160) jerkFramesRef.current = Math.min(10, jerkFramesRef.current + 1);
+      else if (speedAbs < 140) jerkFramesRef.current = 0; // hysteresis reset
+
+      if (jerkFramesRef.current >= 3) {
+        jerkFramesRef.current = 0;
+        void stopBySafety("Sudden movement detected. Stop and rest.", "Stop now. Rest.", {
+          speed_deg_per_sec: Math.round(speedAbs),
+          primary_angle_deg: Number(primaryAngleDeg.toFixed(1))
+        });
+        return;
+      }
     }
 
     // Hard-coded safety rules (non-negotiable)
@@ -1045,13 +1142,21 @@ export function PoseSession(props: {
     }
 
     const deviation = deviationFromSafeRange(primaryAngleDeg, targets.safeMinDeg, targets.safeMaxDeg);
-    if (exerciseActiveRef.current && deviation > props.prescription.deviationStopDeg) {
-      void stopBySafety("Outside safe range. Stop and rest.", "Stop now. Rest.", {
-        deviation_deg: Number(deviation.toFixed(1)),
-        safe_min_deg: targets.safeMinDeg,
-        safe_max_deg: targets.safeMaxDeg
-      });
-      return;
+    if (exerciseActiveRef.current) {
+      // Persistence + hysteresis: require sustained out-of-range before STOP.
+      const stopThreshold = props.prescription.deviationStopDeg;
+      if (deviation > stopThreshold) outOfRangeFramesRef.current = Math.min(20, outOfRangeFramesRef.current + 1);
+      else if (deviation < Math.max(0, stopThreshold - 2)) outOfRangeFramesRef.current = 0;
+
+      if (outOfRangeFramesRef.current >= 10) {
+        outOfRangeFramesRef.current = 0;
+        void stopBySafety("Outside safe range. Stop and rest.", "Stop now. Rest.", {
+          deviation_deg: Number(deviation.toFixed(1)),
+          safe_min_deg: targets.safeMinDeg,
+          safe_max_deg: targets.safeMaxDeg
+        });
+        return;
+      }
     }
 
     // Soft pain warning (clinician flag, not an automatic change to protocol)
@@ -1382,6 +1487,8 @@ export function PoseSession(props: {
 
           <div className="mt-2 rounded-2xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
             <span className="font-medium text-foreground">Tracking:</span> {trackingNote}
+            <span className="mx-2 text-muted-foreground">|</span>
+            <span className="font-medium text-foreground">Lighting:</span> {lightingNote}
           </div>
 
           {error ? (
