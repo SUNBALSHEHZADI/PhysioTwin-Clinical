@@ -135,7 +135,7 @@ export default function SessionClient() {
       <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <div className="text-2xl font-semibold tracking-tight">Exercise Session</div>
-          <div className="text-sm text-muted-foreground">{mod.title} • Camera + skeleton overlay</div>
+          <div className="text-sm text-muted-foreground">{mod.title} - Camera + skeleton overlay</div>
         </div>
         <div className="flex items-center gap-2">
           {saved ? (
@@ -162,11 +162,11 @@ export default function SessionClient() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="text-sm text-muted-foreground">
-                Protocol version: <span className="font-medium text-foreground">{rx.protocolVersion ?? "—"}</span>
+                Protocol version: <span className="font-medium text-foreground">{rx.protocolVersion ?? "-"}</span>
                 {rx.templateKey ? (
                   <>
                     {" "}
-                    • Template: <span className="font-medium text-foreground">{rx.templateKey}</span>
+                    - Template: <span className="font-medium text-foreground">{rx.templateKey}</span>
                   </>
                 ) : null}
               </div>

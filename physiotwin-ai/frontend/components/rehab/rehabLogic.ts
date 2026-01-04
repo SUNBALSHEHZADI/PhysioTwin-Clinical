@@ -92,8 +92,8 @@ export function buildGuidance(params: {
       phase: "setup",
       mistakes,
       pauseAnalysis: true,
-      visual: `Position guidance: step back slightly, move ${direction}, and keep the full limb visible.`,
-      voice: `Please step back slightly and move ${direction}. Keep your full body visible.`
+      visual: `Adjust position: step back, move ${direction}, and keep your full body visible.`,
+      voice: `Step back slightly and move ${direction}. Keep your full body visible.`
     };
   }
 
@@ -104,8 +104,8 @@ export function buildGuidance(params: {
       phase: "rest",
       mistakes,
       pauseAnalysis: false,
-      visual: "Unsafe range detected. Please stop and rest.",
-      voice: "Stop for a moment. This movement is not safe."
+      visual: "Outside safe range. Stop and rest.",
+      voice: "Stop now. Rest."
     };
   }
 
@@ -119,8 +119,8 @@ export function buildGuidance(params: {
   if (mistakes.includes("too_fast")) {
     return {
       ...base,
-      visual: "Please slow down. Aim for a smooth, controlled pace.",
-      voice: "Slow down. Try a smaller, controlled movement."
+      visual: "Slow down. Use smooth, controlled movement.",
+      voice: "Slow down. Smooth and controlled."
     };
   }
 
@@ -128,15 +128,15 @@ export function buildGuidance(params: {
     return {
       ...base,
       visual: "Compensation detected. Reset posture and try again slowly.",
-      voice: params.module === "shoulder" ? "Try again, but keep your shoulder relaxed." : "Reset your posture and try again slowly."
+      voice: params.module === "shoulder" ? "Reset posture. Keep your shoulder relaxed." : "Reset posture. Try again slowly."
     };
   }
 
   if (mistakes.includes("asymmetry")) {
     return {
       ...base,
-      visual: "Imbalance detected. Try to keep both sides even.",
-      voice: "Try to keep both sides even."
+      visual: "Imbalance detected. Keep both sides even.",
+      voice: "Keep both sides even."
     };
   }
 
@@ -172,8 +172,8 @@ export function buildGuidance(params: {
 
   return {
     ...base,
-    visual: "Slight deviation. Adjust gently and continue slowly.",
-    voice: "Adjust slightly and continue slowly."
+    visual: "Small deviation. Adjust gently and continue slowly.",
+    voice: "Adjust gently and continue slowly."
   };
 }
 

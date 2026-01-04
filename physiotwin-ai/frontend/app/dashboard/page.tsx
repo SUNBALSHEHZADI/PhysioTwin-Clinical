@@ -251,7 +251,7 @@ export default function PatientDashboardPage() {
               <div className="text-xs text-muted-foreground">Status</div>
               <div className="mt-1 text-sm font-semibold">Ready for session</div>
               <div className="mt-1 text-xs text-muted-foreground">
-                Latest pain: <span className="font-medium text-foreground">{painLatest}</span>/10 • Alerts:{" "}
+                Latest pain: <span className="font-medium text-foreground">{painLatest}</span>/10 - Alerts:{" "}
                 <span className="font-medium text-foreground">{alertsCount}</span>
               </div>
             </div>
@@ -259,7 +259,7 @@ export default function PatientDashboardPage() {
             <div className="rounded-2xl border border-border bg-background p-4">
               <div className="text-xs text-muted-foreground">Progress summary</div>
               <div className="mt-1 text-sm font-semibold">{sessionsCount} sessions</div>
-              <div className="mt-1 text-xs text-muted-foreground">Recovery score: {summary?.recovery_score ?? "—"} / 100</div>
+              <div className="mt-1 text-xs text-muted-foreground">Recovery score: {summary?.recovery_score ?? "-"} / 100</div>
             </div>
           </div>
 

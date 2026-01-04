@@ -316,7 +316,7 @@ export function PoseSession(props: {
   const durationSec = props.prescription.durationSec;
 
   const [level, setLevel] = useState<Level>("yellow");
-  const [message, setMessage] = useState("Align yourself in frame. We'll guide movement within your clinician-defined safe range.");
+  const [message, setMessage] = useState("Center yourself in frame. We'll guide you within your clinician-defined safe range.");
   const [kneeAngle, setKneeAngle] = useState<number>(0);
   const [hipAngle, setHipAngle] = useState<number>(0);
   const [riskEvents, setRiskEvents] = useState(0);
@@ -327,12 +327,12 @@ export function PoseSession(props: {
   const overlayRef = useRef<{ x: number; y: number; text: string; tone: "safe" | "warn" | "stop" } | null>(null);
   const [fps, setFps] = useState<number>(0);
   const [renderFps, setRenderFps] = useState<number>(0);
-  const [videoRes, setVideoRes] = useState<string>("ΓÇö");
+  const [videoRes, setVideoRes] = useState<string>("-");
   const [phase, setPhase] = useState<"positioning" | "active">("positioning");
   const [readiness, setReadiness] = useState({ lighting: false, space: false, clothing: false });
   const [perfMode, setPerfMode] = useState<PerfMode>("balanced");
   const [facingMode, setFacingMode] = useState<CameraFacingMode>("user");
-  const [trackingNote, setTrackingNote] = useState<string>("ΓÇö");
+  const [trackingNote, setTrackingNote] = useState<string>("-");
   const [tempoEnabled, setTempoEnabled] = useState(true);
   const [tempoPreset, setTempoPreset] = useState<"slow" | "standard" | "fast">("standard");
   const [tempoUi, setTempoUi] = useState<{ phase: "setup" | "raise" | "hold" | "lower" | "rest"; progress: number }>({
@@ -408,14 +408,14 @@ export function PoseSession(props: {
     setRepState("down");
     setRepsCompleted(0);
     setLevel("yellow");
-    setMessage("Align yourself in frame. We'll guide movement within your clinician-defined safe range.");
+    setMessage("Center yourself in frame. We'll guide you within your clinician-defined safe range.");
     setKneeAngle(0);
     setHipAngle(0);
     setAiConfidencePct(0);
     setPhase("positioning");
     setReadiness({ lighting: false, space: false, clothing: false });
     setPerfMode("balanced");
-    setTrackingNote("ΓÇö");
+    setTrackingNote("-");
     setCalibration({ state: "idle", startedAt: null });
     baselineRef.current = { trunkAngleDeg: null, distanceRatio: null };
     setPainCurrent(painBefore);
@@ -722,14 +722,14 @@ export function PoseSession(props: {
       if (still) {
         if (calibration.state === "idle") {
           setCalibration({ state: "calibrating", startedAt: nowMs });
-          setMessage("Calibration: please stand still for 2 seconds.");
+          setMessage("Calibration: stand still for 2 seconds.");
           speakAndLog("Calibration. Please stand still for two seconds.", { severity: "info", dedupeKey: "calib_start", kind: "event" });
         } else if (calibration.state === "calibrating" && calibration.startedAt && nowMs - calibration.startedAt >= 2000) {
           baselineRef.current.trunkAngleDeg = compAngleDeg;
           baselineRef.current.distanceRatio = quality.distance.ratio;
           setCalibration({ state: "done", startedAt: null });
-          setMessage("Calibration complete. Begin movement slowly.");
-          speakAndLog("Calibration complete. Begin movement slowly.", { severity: "info", dedupeKey: "calib_done", kind: "event" });
+          setMessage("Calibration complete. Move slowly and stay in range.");
+          speakAndLog("Calibration complete. Move slowly and stay in range.", { severity: "info", dedupeKey: "calib_done", kind: "event" });
         }
       } else if (calibration.state === "calibrating") {
         setCalibration({ state: "idle", startedAt: null });
@@ -749,7 +749,7 @@ export function PoseSession(props: {
       const helpMsg =
         calibration.state !== "done"
           ? "Calibration in progress. Please stand still."
-          : `Position guidance: ${quality.message}${confidencePct < 60 ? " Improve lighting and reduce background clutter." : ""}`;
+          : `Adjust position: ${quality.message}${confidencePct < 60 ? " Improve lighting and reduce background clutter." : ""}`;
       setMessage(helpMsg);
       if (nowMs - lastPoseGuideAtRef.current > 6500) {
         lastPoseGuideAtRef.current = nowMs;
@@ -775,7 +775,7 @@ export function PoseSession(props: {
         overlayRef.current = {
           x: joint.x * w,
           y: joint.y * h,
-          text: `${jointName}: ${Math.round(primaryAngleDeg)}┬░`,
+          text: `${jointName}: ${Math.round(primaryAngleDeg)}deg`,
           tone: "warn"
         };
         // Angle arc near the primary joint
@@ -887,7 +887,7 @@ export function PoseSession(props: {
       const joint = props.exerciseKey === "shoulder_flexion" ? shoulder : props.exerciseKey === "elbow_flexion" ? elbow : knee;
       const jointName = props.exerciseKey === "shoulder_flexion" ? "Shoulder" : props.exerciseKey === "elbow_flexion" ? "Elbow" : "Knee";
       const tone = fb.level === "green" ? "safe" : fb.level === "yellow" ? "warn" : "stop";
-      overlayRef.current = { x: joint.x * w, y: joint.y * h, text: `${jointName}: ${Math.round(primaryAngleDeg)}┬░`, tone };
+      overlayRef.current = { x: joint.x * w, y: joint.y * h, text: `${jointName}: ${Math.round(primaryAngleDeg)}deg`, tone };
 
       // Highlight active limb/joint for better UX.
       if (props.exerciseKey === "shoulder_flexion") {
@@ -1022,36 +1022,35 @@ export function PoseSession(props: {
 
     // Sudden jerky movement (hard stop)
     if (exerciseActiveRef.current && Math.abs(speedDegPerSec ?? 0) > 160) {
-      void stopBySafety(
-        "Sudden jerky movement detected. Session stopped for safety.",
-        "Slow down. Stop for a moment.",
-        { speed_deg_per_sec: Math.round(Math.abs(speedDegPerSec ?? 0)), primary_angle_deg: Number(primaryAngleDeg.toFixed(1)) }
-      );
+      void stopBySafety("Sudden movement detected. Stop and rest.", "Stop now. Rest.", {
+        speed_deg_per_sec: Math.round(Math.abs(speedDegPerSec ?? 0)),
+        primary_angle_deg: Number(primaryAngleDeg.toFixed(1))
+      });
       return;
     }
 
     // Hard-coded safety rules (non-negotiable)
     if (reportedSwelling || reportedDizziness) {
       void stopBySafety(
-        "Patient-reported symptoms require stopping the session.",
-        "Stop the exercise now and take a short rest.",
+        "Reported symptoms require stopping. Stop and contact your clinician if needed.",
+        "Stop now. Rest. Contact your clinician if needed.",
         { swelling: reportedSwelling, dizziness: reportedDizziness }
       );
       return;
     }
 
     if (painCurrent >= 7) {
-      void stopBySafety("Pain level is high. Session paused.", "Pain level is high. Session paused.", { pain: painCurrent });
+      void stopBySafety("Pain is high. Stop and rest.", "Stop now. Rest.", { pain: painCurrent });
       return;
     }
 
     const deviation = deviationFromSafeRange(primaryAngleDeg, targets.safeMinDeg, targets.safeMaxDeg);
     if (exerciseActiveRef.current && deviation > props.prescription.deviationStopDeg) {
-      void stopBySafety(
-        "Your joint angle is outside the safe range. Session stopped for safety.",
-        "This movement is not safe. Stop now and take rest.",
-        { deviation_deg: Number(deviation.toFixed(1)), safe_min_deg: targets.safeMinDeg, safe_max_deg: targets.safeMaxDeg }
-      );
+      void stopBySafety("Outside safe range. Stop and rest.", "Stop now. Rest.", {
+        deviation_deg: Number(deviation.toFixed(1)),
+        safe_min_deg: targets.safeMinDeg,
+        safe_max_deg: targets.safeMaxDeg
+      });
       return;
     }
 
@@ -1063,10 +1062,10 @@ export function PoseSession(props: {
           ts: new Date().toISOString(),
           severity: "warning",
           type: "pain_warning",
-          message: "Pain level moderate (4ΓÇô6). Clinician review recommended.",
+          message: "Pain level moderate (4-6). Clinician review recommended.",
           data: { pain: painCurrent }
         });
-        speakAndLog("Please slow down. If pain increases, stop and rest.", { severity: "warning", dedupeKey: "pain_warning" });
+        speakAndLog("Slow down. If pain increases, stop and rest.", { severity: "warning", dedupeKey: "pain_warning" });
       }
     }
 
@@ -1116,8 +1115,8 @@ export function PoseSession(props: {
     // Readiness gate (reduces false stops / low-confidence prompts).
     const readyOk = readiness.lighting && readiness.space && readiness.clothing;
     if (!readyOk) {
-      setMessage("Before starting, confirm the readiness checks below for best tracking quality.");
-      speakAndLog("Before starting, please confirm the readiness checks below for best tracking quality.", {
+      setMessage("Before starting, complete the readiness checks for best tracking quality.");
+      speakAndLog("Before starting, please complete the readiness checks for best tracking quality.", {
         severity: "info",
         dedupeKey: "readiness_gate",
         kind: "event"
@@ -1134,9 +1133,9 @@ export function PoseSession(props: {
       // Safety gate: pain ΓëÑ 7 should stop before starting.
       if (painBefore >= 7) {
         setLevel("red");
-        setMessage("Pain level is high. Session paused.");
+        setMessage("Pain is high. Stop and rest.");
         logEvent({ ts: new Date().toISOString(), severity: "stop", type: "pain_stop", message: "Pain ΓëÑ 7. Session start blocked." });
-        speakAndLog("Pain level is high. Session paused.", { severity: "stop", priority: "high", dedupeKey: "pain_stop_start" });
+        speakAndLog("Pain is high. Stop and rest.", { severity: "stop", priority: "high", dedupeKey: "pain_stop_start" });
         setRunning(false);
         setStatus("ready");
         return;
@@ -1269,7 +1268,7 @@ export function PoseSession(props: {
   const styles = levelStyles(level);
 
   const rangeGauge = useMemo(() => {
-    // Simple 0ΓÇô180┬░ gauge that shows safe + ideal bands + current angle marker.
+    // Simple 0-180deg gauge that shows safe + ideal bands + current angle marker.
     const min = 0;
     const max = 180;
     const safeL = clamp(((targets.safeMinDeg - min) / (max - min)) * 100, 0, 100);
@@ -1288,18 +1287,10 @@ export function PoseSession(props: {
       if (!startedAt) return;
       const elapsedSec = (Date.now() - startedAt) / 1000;
       if (elapsedSec >= durationSec && !stoppedBySafetyRef.current) {
-        void stopBySafety(
-          "Session time limit reached. Session stopped for safety.",
-          "Stop the exercise now and take a short rest.",
-          { duration_sec: durationSec }
-        );
+        void stopBySafety("Time limit reached. Stop and rest.", "Stop now. Rest.", { duration_sec: durationSec });
       }
       if (repsCompleted >= targetReps && !stoppedBySafetyRef.current) {
-        void stopBySafety(
-          "Repetition limit reached. Session stopped.",
-          "Stop the exercise now and take a short rest.",
-          { rep_limit: targetReps }
-        );
+        void stopBySafety("Repetition limit reached. Stop and rest.", "Stop now. Rest.", { rep_limit: targetReps });
       }
     }, 500);
     return () => window.clearInterval(i);
@@ -1373,12 +1364,12 @@ export function PoseSession(props: {
           <div className="mt-3 grid gap-2 rounded-2xl border border-border bg-background p-4 sm:grid-cols-3">
             <div>
               <div className="text-xs text-muted-foreground">Camera</div>
-              <div className="text-sm font-medium">{running ? "On" : "Off"} ΓÇó {videoRes}</div>
+              <div className="text-sm font-medium">{running ? "On" : "Off"} - {videoRes}</div>
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Performance</div>
               <div className="text-sm font-medium">
-                {renderFps ? `${renderFps} render FPS` : "ΓÇö"} ΓÇó {fps ? `${fps} infer FPS` : "ΓÇö"} ΓÇó {aiConfidencePct}% confidence
+                {renderFps ? `${renderFps} render FPS` : "-"} - {fps ? `${fps} infer FPS` : "-"} - {aiConfidencePct}% confidence
               </div>
             </div>
             <div>
@@ -1472,7 +1463,7 @@ export function PoseSession(props: {
 
               <div className="mt-4 grid gap-2">
                 <div className="text-sm font-medium">Tempo coaching (optional)</div>
-                <div className="text-xs text-muted-foreground">Adds ΓÇ£up / down / holdΓÇ¥ pacing prompts to support controlled reps.</div>
+                <div className="text-xs text-muted-foreground">Adds \"up / down / hold\" pacing prompts to support controlled reps.</div>
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
@@ -1551,7 +1542,7 @@ export function PoseSession(props: {
               </Button>
             </div>
             <div className="text-xs text-muted-foreground">
-              Rep limit: <span className="font-medium text-foreground">{targetReps}</span> ΓÇó Time limit:{" "}
+              Rep limit: <span className="font-medium text-foreground">{targetReps}</span> - Time limit:{" "}
               <span className="font-medium text-foreground">{durationSec}s</span>
             </div>
           </div>
@@ -1582,10 +1573,10 @@ export function PoseSession(props: {
             <div className="rounded-2xl border border-border bg-background p-4">
               <div className="text-sm font-medium">{message}</div>
               <div className="mt-1 text-xs text-muted-foreground">
-                Joint: <span className="font-medium text-foreground">{kneeAngle.toFixed(0)}┬░</span> ΓÇó Posture:{" "}
-                <span className="font-medium text-foreground">{hipAngle.toFixed(0)}┬░</span> ΓÇó Safe range:{" "}
+                Joint: <span className="font-medium text-foreground">{kneeAngle.toFixed(0)}deg</span> - Posture:{" "}
+                <span className="font-medium text-foreground">{hipAngle.toFixed(0)}deg</span> - Safe range:{" "}
                 <span className="font-medium text-foreground">
-                  {targets.safeMinDeg}┬░ΓÇô{targets.safeMaxDeg}┬░
+                  {targets.safeMinDeg}deg-{targets.safeMaxDeg}deg
                 </span>
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
@@ -1611,11 +1602,11 @@ export function PoseSession(props: {
                   />
                 </div>
                 <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>0┬░</span>
+                  <span>0deg</span>
                   <span>
-                    Ideal {targets.idealMinDeg}┬░ΓÇô{targets.idealMaxDeg}┬░
+                    Ideal {targets.idealMinDeg}deg-{targets.idealMaxDeg}deg
                   </span>
-                  <span>180┬░</span>
+                  <span>180deg</span>
                 </div>
               </div>
             </div>
@@ -1637,13 +1628,20 @@ export function PoseSession(props: {
               </div>
             </div>
 
-            <VoiceSettingsPanel compact />
+            <details className="rounded-2xl border border-border bg-background p-4">
+              <summary className="cursor-pointer select-none text-sm font-medium">
+                Voice settings <span className="ml-2 text-xs text-muted-foreground">(tap to expand)</span>
+              </summary>
+              <div className="mt-3">
+                <VoiceSettingsPanel compact />
+              </div>
+            </details>
 
             <div className="rounded-2xl border border-border bg-background p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-medium">AI chat</div>
-                  <div className="text-xs text-muted-foreground">Ask ΓÇ£Why did it stop?ΓÇ¥ or ΓÇ£Can I continue?ΓÇ¥</div>
+                  <div className="text-xs text-muted-foreground">Ask \"Why did it stop?\" or \"Can I continue?\"</div>
                 </div>
                 <ClinicalChatDialog
                   voiceEnabled={voiceEnabled}
@@ -1693,7 +1691,7 @@ export function PoseSession(props: {
                 onChange={(e) => setPainBefore(Number(e.target.value))}
                 className="w-full"
               />
-              <div className="text-xs text-muted-foreground">Hard stop at pain ΓëÑ 7. Pain 4ΓÇô6 triggers clinician flag.</div>
+              <div className="text-xs text-muted-foreground">Hard stop at pain &gt;= 7. Pain 4-6 triggers clinician flag.</div>
             </div>
 
             <div className="grid gap-2">

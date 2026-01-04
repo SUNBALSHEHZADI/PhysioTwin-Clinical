@@ -22,33 +22,33 @@ export function getPhaseCoachingPrompt(params: {
 
   // Small, clinician-safe phrasing. No diagnosis, no prescriptions.
   const setupCommon = [
-    "Take a second to center yourself. Keep your full body visible.",
-    "Please step back slightly and face the camera. We’ll start when the view is clear.",
-    "Good. Hold still for a moment so tracking can stabilize."
+    "Center yourself in frame. Keep your full body visible.",
+    "Step back slightly and face the camera. We'll start when tracking is stable.",
+    "Hold still for a moment so tracking can stabilize."
   ];
 
   const restCommon = [
     "Good. Take a short rest and breathe normally.",
-    "Pause here. When you’re ready, continue slowly.",
-    "Rest for a moment. Keep your posture relaxed."
+    "Pause here. When you're ready, continue slowly.",
+    "Rest briefly. Keep your posture relaxed."
   ];
 
   const byModule: Record<RehabModuleKey, Record<MovementPhase, string[]>> = {
     knee: {
       setup: setupCommon,
       raise: [
-        "Slowly extend your knee. Keep your thigh stable.",
-        "Straighten the knee gently—no sudden push.",
-        "Good. Extend a little at a time and stay controlled."
+        "Slowly extend your knee. Keep your thigh steady.",
+        "Straighten gently. No sudden push.",
+        "Good. Small movements. Stay controlled."
       ],
       hold: [
-        "Good. Hold that position for a moment.",
-        "Hold. Keep the knee steady and breathe.",
-        "Nice. Maintain control—no wobbling."
+        "Hold for a moment. Keep the knee steady.",
+        "Hold. Breathe normally. Stay steady.",
+        "Good. Keep it steady. No wobble."
       ],
       lower: [
-        "Now lower slowly—keep control on the way down.",
-        "Ease back down gently. No drop.",
+        "Lower slowly. Keep control on the way down.",
+        "Ease down gently. No drop.",
         "Good. Return slowly and smoothly."
       ],
       rest: restCommon
@@ -57,18 +57,18 @@ export function getPhaseCoachingPrompt(params: {
       setup: setupCommon,
       raise: [
         "Lift your arm slowly. Keep your shoulder relaxed.",
-        "Raise smoothly—avoid shrugging the shoulder.",
-        "Good. Lift with control and keep your trunk still."
+        "Raise smoothly. Avoid shrugging.",
+        "Good. Stay tall. Keep your trunk still."
       ],
       hold: [
-        "Hold here. Keep the shoulder down and relaxed.",
-        "Good. Hold—steady breathing, steady arm.",
-        "Nice. Maintain the position without leaning."
+        "Hold. Keep the shoulder down and relaxed.",
+        "Hold. Breathe normally. Keep the arm steady.",
+        "Good. Hold without leaning."
       ],
       lower: [
         "Lower slowly. Keep the movement smooth.",
         "Ease down with control. No sudden drop.",
-        "Good. Return slowly and keep your posture tall."
+        "Good. Return slowly. Keep posture tall."
       ],
       rest: restCommon
     },
@@ -76,18 +76,18 @@ export function getPhaseCoachingPrompt(params: {
       setup: setupCommon,
       raise: [
         "Bend your elbow slowly. Keep the upper arm steady.",
-        "Flex the elbow gently—smooth and controlled.",
-        "Good. Keep your shoulder quiet while the elbow moves."
+        "Flex gently. Smooth and controlled.",
+        "Good. Keep the shoulder quiet while the elbow moves."
       ],
       hold: [
         "Hold. Keep the elbow steady.",
-        "Good. Hold that angle for a moment.",
-        "Nice. Maintain control—no shaking."
+        "Hold that angle for a moment.",
+        "Good. Keep it steady. No shaking."
       ],
       lower: [
-        "Straighten the elbow slowly—stay controlled.",
+        "Straighten slowly. Stay controlled.",
         "Ease out slowly. Keep the movement smooth.",
-        "Good. Return slowly and keep the shoulder relaxed."
+        "Good. Return slowly. Keep the shoulder relaxed."
       ],
       rest: restCommon
     }

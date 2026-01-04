@@ -271,10 +271,10 @@ export default function ProgressPage() {
                   <div className="text-sm font-semibold">{new Date(s.created_at).toLocaleString()}</div>
                   <div className="text-xs text-muted-foreground">
                     Pain (before/after): <span className="font-medium text-foreground">{s.pain_before}</span> /{" "}
-                    <span className="font-medium text-foreground">{s.pain_after}</span> • Reps:{" "}
-                    <span className="font-medium text-foreground">{s.reps_completed}</span> • Avg knee:{" "}
-                    <span className="font-medium text-foreground">{Math.round(s.avg_knee_angle_deg)}°</span> • Risk:{" "}
-                    <span className="font-medium text-foreground">{s.risk_events}</span> • AI confidence:{" "}
+                    <span className="font-medium text-foreground">{s.pain_after}</span> - Reps:{" "}
+                    <span className="font-medium text-foreground">{s.reps_completed}</span> - Avg knee:{" "}
+                    <span className="font-medium text-foreground">{Math.round(s.avg_knee_angle_deg)}deg</span> - Risk:{" "}
+                    <span className="font-medium text-foreground">{s.risk_events}</span> - AI confidence:{" "}
                     <span className="font-medium text-foreground">{s.ai_confidence_pct}%</span>
                   </div>
                 </div>

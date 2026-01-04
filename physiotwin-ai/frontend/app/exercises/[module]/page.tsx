@@ -31,7 +31,7 @@ const MODULES: Record<
     imageSrc: "/images/exercises/shoulder.svg",
     bullets: [
       "Keep the shoulder relaxed. Avoid trunk lean or shrugging.",
-      "Control the tempo—smooth up, smooth down.",
+      "Control the tempo - smooth up, smooth down.",
       "Follow on-screen positioning prompts before starting reps."
     ]
   },
@@ -41,7 +41,7 @@ const MODULES: Record<
     imageSrc: "/images/exercises/arm.svg",
     bullets: [
       "Keep shoulder stable. Avoid compensating with the trunk.",
-      "Maintain the elbow in frame (shoulder–elbow–wrist visible).",
+      "Maintain the elbow in frame (shoulder-elbow-wrist visible).",
       "Use the back camera on mobile for sharper tracking."
     ]
   }
@@ -68,7 +68,7 @@ export default async function ExerciseLandingPage({ params }: { params: Promise<
           <div className="overflow-hidden rounded-3xl border border-border bg-muted/20 shadow-soft">
             <Image
               src={m.imageSrc}
-              alt={`${m.title} — PhysioTwin Clinical`}
+              alt={`${m.title} - PhysioTwin Clinical`}
               width={1600}
               height={900}
               priority

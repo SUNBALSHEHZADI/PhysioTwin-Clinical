@@ -169,8 +169,8 @@ export default function TherapistDashboardPage() {
               <div>
                 <div className="text-sm font-semibold">{p.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  Recovery score: <span className="font-medium text-foreground">{p.recovery_score}</span> • Last session:{" "}
-                  <span className="font-medium text-foreground">{p.last_session_at ?? "—"}</span>
+                  Recovery score: <span className="font-medium text-foreground">{p.recovery_score}</span> - Last session:{" "}
+                  <span className="font-medium text-foreground">{p.last_session_at ?? "-"}</span>
                 </div>
               </div>
               <div className="flex items-center gap-2">

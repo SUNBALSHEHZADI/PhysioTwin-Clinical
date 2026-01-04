@@ -49,20 +49,20 @@ export function answerClinicalQuestion(qRaw: string, ctx: ClinicalChatContext): 
 
   if (q.includes("am i") || q.includes("doing this right") || q.includes("form") || q.includes("correct")) {
     const rx = ctx.prescription
-      ? `Your clinician-defined safe range is ${ctx.prescription.safeMinDeg}–${ctx.prescription.safeMaxDeg}°.`
+      ? `Your clinician-defined safe range is ${ctx.prescription.safeMinDeg}-${ctx.prescription.safeMaxDeg}deg.`
       : "Your clinician-defined safe range is displayed on screen.";
     return `For ${module}, aim for a smooth, controlled movement within the safe range. ${rx} If you see WARNING, make a small correction and slow down. If you see STOP, pause and rest before trying again. ${boundary}`;
   }
 
   if (q.includes("pain")) {
-    return `If pain reaches 7/10 or higher, the session should stop. Pain 4–6/10 may trigger a clinician flag. Please update pain honestly during the session. ${boundary}`;
+    return `If pain reaches 7/10 or higher, the session should stop. Pain 4-6/10 may trigger a clinician flag. Please update pain honestly during the session. ${boundary}`;
   }
 
   if (q.includes("range") || q.includes("angle") || q.includes("safe")) {
     const rx = ctx.prescription
-      ? `Your clinician-defined safe joint angle range is ${ctx.prescription.safeMinDeg}–${ctx.prescription.safeMaxDeg}°.`
+      ? `Your clinician-defined safe joint angle range is ${ctx.prescription.safeMinDeg}-${ctx.prescription.safeMaxDeg}deg.`
       : "Your clinician-defined safe joint angle range is shown in the session protocol.";
-    return `${rx} If deviation exceeds 15° from the safe boundary, the system will trigger a STOP alert. ${boundary}`;
+    return `${rx} If deviation exceeds 15deg from the safe boundary, the system will trigger a STOP alert. ${boundary}`;
   }
 
   if (q.includes("too fast") || q.includes("speed") || q.includes("slow")) {

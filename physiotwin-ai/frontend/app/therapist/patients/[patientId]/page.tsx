@@ -67,13 +67,13 @@ function draftSessionNoteFromList(session: {
   ai_confidence_pct: number;
 }): string {
   return [
-    "PhysioTwin Clinical — Session Note Draft (Decision support only)",
+    "PhysioTwin Clinical - Session Note Draft (Decision support only)",
     "",
     `Date/time: ${new Date(session.created_at).toLocaleString()}`,
     `Exercise: ${session.exercise_key}`,
     `Pain (before/after): ${session.pain_before} / ${session.pain_after}`,
     `Reps completed: ${session.reps_completed}`,
-    `Avg angle (primary): ${Math.round(session.avg_knee_angle_deg)}°`,
+    `Avg angle (primary): ${Math.round(session.avg_knee_angle_deg)}deg`,
     `Risk events: ${session.risk_events}`,
     `Adherence score: ${session.adherence_score}`,
     `AI confidence: ${session.ai_confidence_pct}%`,
@@ -304,11 +304,11 @@ export default function TherapistPatientDetailsPage() {
                   <Badge variant={d.is_locked ? "danger" : "success"}>{d.is_locked ? "Locked" : "Unlocked"}</Badge>
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Version: <span className="font-medium text-foreground">{r?.protocol_version ?? "—"}</span>
+                  Version: <span className="font-medium text-foreground">{r?.protocol_version ?? "-"}</span>
                   {r?.template_key ? (
                     <>
                       {" "}
-                      • Template: <span className="font-medium text-foreground">{r.template_key}</span>
+                      - Template: <span className="font-medium text-foreground">{r.template_key}</span>
                     </>
                   ) : null}
                 </div>
@@ -444,7 +444,7 @@ export default function TherapistPatientDetailsPage() {
                   <div className="text-sm font-medium">{s.exercise_key}</div>
                   <div className="text-xs text-muted-foreground">{new Date(s.created_at).toLocaleString()}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    Pain {s.pain_before}→{s.pain_after} • Reps {s.reps_completed} • Risk {s.risk_events} • Confidence {s.ai_confidence_pct}%
+                    Pain {s.pain_before}-&gt;{s.pain_after} - Reps {s.reps_completed} - Risk {s.risk_events} - Confidence {s.ai_confidence_pct}%
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
