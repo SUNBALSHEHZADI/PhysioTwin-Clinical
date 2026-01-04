@@ -1,5 +1,11 @@
+<<<<<<< HEAD:physiotwin-ai/frontend/app/session/SessionClient.tsx
+import { Suspense } from "react";
+
+<<<<<<<< HEAD:physiotwin-ai/frontend/app/session/SessionClient.tsx
+=======
 "use client";
 
+>>>>>>> 4c365ef (Upgrade rehab sessions + home UX; clean build artifacts):frontend/app/session/SessionClient.tsx
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -129,8 +135,18 @@ export default function SessionClient() {
       </Card>
     );
   }
+<<<<<<< HEAD:physiotwin-ai/frontend/app/session/SessionClient.tsx
+========
+import SessionClient from "./SessionClient";
+>>>>>>>> 4c365ef (Upgrade rehab sessions + home UX; clean build artifacts):frontend/app/session/page.tsx
+
+function Loading() {
+  return (
+<<<<<<<< HEAD:physiotwin-ai/frontend/app/session/SessionClient.tsx
+=======
 
   return (
+>>>>>>> 4c365ef (Upgrade rehab sessions + home UX; clean build artifacts):frontend/app/session/SessionClient.tsx
     <div className="space-y-4">
       <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
         <div>
@@ -234,8 +250,25 @@ export default function SessionClient() {
           <CardContent className="text-sm text-muted-foreground">Please wait.</CardContent>
         </Card>
       )}
+<<<<<<< HEAD:physiotwin-ai/frontend/app/session/SessionClient.tsx
+========
+    <div className="rounded-2xl border border-border bg-background p-6 text-sm text-muted-foreground">
+      Loading session…
+>>>>>>>> 4c365ef (Upgrade rehab sessions + home UX; clean build artifacts):frontend/app/session/page.tsx
+=======
+>>>>>>> 4c365ef (Upgrade rehab sessions + home UX; clean build artifacts):frontend/app/session/SessionClient.tsx
     </div>
   );
 }
 
+<<<<<<< HEAD:physiotwin-ai/frontend/app/session/SessionClient.tsx
+export default function Page() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <SessionClient />
+    </Suspense>
+  );
+}
+=======
 
+>>>>>>> 4c365ef (Upgrade rehab sessions + home UX; clean build artifacts):frontend/app/session/SessionClient.tsx

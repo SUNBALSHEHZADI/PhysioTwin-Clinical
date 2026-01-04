@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ShieldAlert, Users } from "lucide-react";
+import Image from "next/image";
 
 import { api } from "@/lib/api";
 import { getAuth, type AuthState } from "@/utils/auth";
@@ -102,12 +103,29 @@ export default function TherapistDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-        <div>
+      <div className="grid gap-4 lg:grid-cols-12">
+        <div className="lg:col-span-8">
           <div className="text-2xl font-semibold tracking-tight">Physiotherapist Dashboard</div>
-          <div className="text-sm text-muted-foreground">Asynchronous review queue, session exports, and protocol control.</div>
+          <div className="mt-1 text-sm text-muted-foreground">Asynchronous review queue, session exports, and protocol control.</div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Badge variant={mode === "live" ? "success" : "warning"}>{mode === "live" ? "Connected" : "Offline demo data"}</Badge>
+            <Badge variant="info">Therapist mode</Badge>
+          </div>
         </div>
-        <Badge variant={mode === "live" ? "success" : "warning"}>{mode === "live" ? "Connected" : "Offline demo data"}</Badge>
+        <div className="lg:col-span-4">
+          <div className="relative overflow-hidden rounded-3xl border border-border bg-muted/20 shadow-soft">
+            <Image
+              src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSispaReHx4OVRakSf-ZkNiJjWCIMKBoJZLjzvV1bNn&s"
+              alt="Therapist mode"
+              width={900}
+              height={520}
+              priority
+              quality={90}
+              className="h-[140px] w-full object-cover sm:h-[160px]"
+            />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/45 via-transparent to-transparent" />
+          </div>
+        </div>
       </div>
 
       <Card>

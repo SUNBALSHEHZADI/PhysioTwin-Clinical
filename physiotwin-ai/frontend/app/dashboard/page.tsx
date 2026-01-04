@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import Image from "next/image";
 
 import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -177,18 +178,38 @@ export default function PatientDashboardPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-        <div>
+      <div className="grid gap-4 lg:grid-cols-12">
+        <div className="lg:col-span-8">
           <div className="text-2xl font-semibold tracking-tight">Patient Dashboard</div>
-          <div className="text-sm text-muted-foreground">Minimal view for safe, clinician-supervised home sessions.</div>
+          <div className="mt-1 text-sm text-muted-foreground">Minimal view for safe, clinician-supervised home sessions.</div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Badge variant={mode === "live" ? "success" : "warning"}>{mode === "live" ? "Connected" : "Offline demo data"}</Badge>
+            <Badge variant="info">Patient mode</Badge>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button asChild>
+              <Link href={`/session?module=${mod.key}`}>
+                Start rehab <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href={`/exercises/${mod.key}`}>Exercise details</Link>
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={mode === "live" ? "success" : "warning"}>{mode === "live" ? "Connected" : "Offline demo data"}</Badge>
-          <Button asChild>
-            <Link href={`/session?module=${mod.key}`}>
-              Start rehab <ArrowRight className="h-4 w-4" />
-            </Link>
-          </Button>
+        <div className="lg:col-span-4">
+          <div className="relative overflow-hidden rounded-3xl border border-border bg-muted/20 shadow-soft">
+            <Image
+              src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSyp2ECzOcYPlHtHBkoYEFz64Tv_-wyz5MGaw&s"
+              alt="Patient mode"
+              width={900}
+              height={520}
+              priority
+              quality={90}
+              className="h-[140px] w-full object-cover sm:h-[160px]"
+            />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/45 via-transparent to-transparent" />
+          </div>
         </div>
       </div>
 
@@ -218,6 +239,11 @@ export default function PatientDashboardPage() {
                     {m.key === "knee" ? "Knee" : m.key === "shoulder" ? "Shoulder" : "Arm"}
                   </button>
                 ))}
+              </div>
+              <div className="mt-3">
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/exercises/${mod.key}`}>View instructions</Link>
+                </Button>
               </div>
             </div>
 

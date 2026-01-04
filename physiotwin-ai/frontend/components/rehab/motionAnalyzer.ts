@@ -33,12 +33,13 @@ export function angleSpeedDegPerSec(state: AngleSpeedState, nowMs: number, angle
   if (!last) return null;
   const dtSec = (nowMs - last.ts) / 1000;
   if (dtSec <= 0.05 || dtSec > 1.0) return null;
-  return Math.abs(angleDeg - last.angle) / dtSec;
+  // Signed speed: positive when angle increases, negative when decreases.
+  return (angleDeg - last.angle) / dtSec;
 }
 
 export function isJerky(speedDegPerSec: number | null, threshold = 160): boolean {
   if (speedDegPerSec == null) return false;
-  return speedDegPerSec > threshold;
+  return Math.abs(speedDegPerSec) > threshold;
 }
 
 

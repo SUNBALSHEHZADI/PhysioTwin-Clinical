@@ -89,4 +89,23 @@ export function createCamera(videoEl: HTMLVideoElement, onFrame: () => Promise<v
   return new CameraCtor(videoEl, { onFrame, width, height });
 }
 
+export type CameraFacingMode = "user" | "environment";
+
+export function createCameraWithFacingMode(
+  videoEl: HTMLVideoElement,
+  onFrame: () => Promise<void>,
+  opts: { width?: number; height?: number; facingMode?: CameraFacingMode } = {}
+) {
+  const CameraCtor = mp().Camera;
+  if (typeof CameraCtor !== "function") {
+    throw new Error("MediaPipe Camera is not available. Ensure camera_utils CDN script can be loaded.");
+  }
+  return new CameraCtor(videoEl, {
+    onFrame,
+    width: opts.width ?? 720,
+    height: opts.height ?? 540,
+    facingMode: opts.facingMode ?? "user"
+  });
+}
+
 

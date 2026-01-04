@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Stethoscope, User } from "lucide-react";
+import Image from "next/image";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,24 +61,48 @@ export default function LoginPage() {
           <form onSubmit={onSubmit} className="space-y-5">
             <div className="grid gap-2">
               <Label>Role</Label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={() => setRole("patient")}
-                  className={`flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm transition-colors ${
+                  className={`group overflow-hidden rounded-2xl border text-left transition-colors ${
                     role === "patient" ? "border-transparent bg-background shadow-soft" : "border-border bg-muted/30 hover:bg-muted"
                   }`}
                 >
-                  <User className="h-4 w-4" /> Patient
+                  <div className="relative h-20 w-full bg-muted/20">
+                    <Image
+                      src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSyp2ECzOcYPlHtHBkoYEFz64Tv_-wyz5MGaw&s"
+                      alt="Patient mode"
+                      fill
+                      sizes="(max-width: 640px) 50vw, 240px"
+                      className="object-cover opacity-95 transition-opacity group-hover:opacity-100"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-background/70 via-background/10 to-transparent" />
+                  </div>
+                  <div className="flex items-center gap-2 px-4 py-3 text-sm">
+                    <User className="h-4 w-4" /> Patient mode
+                  </div>
                 </button>
                 <button
                   type="button"
                   onClick={() => setRole("therapist")}
-                  className={`flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm transition-colors ${
+                  className={`group overflow-hidden rounded-2xl border text-left transition-colors ${
                     role === "therapist" ? "border-transparent bg-background shadow-soft" : "border-border bg-muted/30 hover:bg-muted"
                   }`}
                 >
-                  <Stethoscope className="h-4 w-4" /> Therapist
+                  <div className="relative h-20 w-full bg-muted/20">
+                    <Image
+                      src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSispaReHx4OVRakSf-ZkNiJjWCIMKBoJZLjzvV1bNn&s"
+                      alt="Therapist mode"
+                      fill
+                      sizes="(max-width: 640px) 50vw, 240px"
+                      className="object-cover opacity-95 transition-opacity group-hover:opacity-100"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-background/70 via-background/10 to-transparent" />
+                  </div>
+                  <div className="flex items-center gap-2 px-4 py-3 text-sm">
+                    <Stethoscope className="h-4 w-4" /> Therapist mode
+                  </div>
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">

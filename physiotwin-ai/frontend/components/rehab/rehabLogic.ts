@@ -79,7 +79,7 @@ export function buildGuidance(params: {
   mistakes.push(...centering);
 
   if (params.confidencePct < 60) mistakes.push("low_confidence");
-  if ((params.speedDegPerSec ?? 0) > 160) mistakes.push("too_fast");
+  if (Math.abs(params.speedDegPerSec ?? 0) > 160) mistakes.push("too_fast");
   if (params.deviationDeg > 0) mistakes.push("out_of_range");
   if (params.compensation) mistakes.push("compensation");
   if ((params.asymmetryDeg ?? 0) > 12) mistakes.push("asymmetry");
