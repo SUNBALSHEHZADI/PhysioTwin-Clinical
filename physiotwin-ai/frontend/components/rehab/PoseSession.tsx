@@ -287,6 +287,10 @@ export function PoseSession(props: {
   const lightingOkFramesRef = useRef<number>(0);
   const lastLightingNoteRef = useRef<string>("");
   const lastLightingVoiceAtRef = useRef<number>(0);
+  const stillSinceRef = useRef<number | null>(null);
+  const lastCalibUiAtRef = useRef<number>(0);
+  const lastCompAngleDegRef = useRef<number>(0);
+  const lastDistanceRatioRef = useRef<number | null>(null);
 
   // Persistence counters for safety conditions (reduces false stops due to single-frame spikes).
   const jerkFramesRef = useRef<number>(0);
@@ -352,10 +356,11 @@ export function PoseSession(props: {
     phase: "setup",
     progress: 0
   });
-  const [calibration, setCalibration] = useState<{ state: "idle" | "calibrating" | "done"; startedAt: number | null }>({
+  const [calibration, setCalibration] = useState<{ state: "idle" | "calibrating" | "done" | "skipped"; startedAt: number | null }>({
     state: "idle",
     startedAt: null
   });
+  const [calibUi, setCalibUi] = useState<{ progress: number; secondsLeft: number }>({ progress: 0, secondsLeft: 2 });
   const baselineRef = useRef<{ trunkAngleDeg: number | null; distanceRatio: number | null }>({ trunkAngleDeg: null, distanceRatio: null });
   const lastTrackingNoteRef = useRef<string>("");
 
@@ -429,8 +434,14 @@ export function PoseSession(props: {
     setReadiness({ lighting: false, space: false, clothing: false });
     setPerfMode("balanced");
     setTrackingNote("-");
+    setLightingNote("-");
     setCalibration({ state: "idle", startedAt: null });
+    setCalibUi({ progress: 0, secondsLeft: 2 });
     baselineRef.current = { trunkAngleDeg: null, distanceRatio: null };
+    stillSinceRef.current = null;
+    lastCalibUiAtRef.current = 0;
+    jerkFramesRef.current = 0;
+    outOfRangeFramesRef.current = 0;
     setPainCurrent(painBefore);
     setReportedSwelling(false);
     setReportedDizziness(false);
@@ -469,6 +480,19 @@ export function PoseSession(props: {
     } catch {
       // ignore
     }
+  }
+
+  function skipCalibration() {
+    // Demo-friendly escape hatch: allow starting guidance even if the environment is noisy.
+    // We keep a reasonable baseline to avoid over-triggering compensation warnings.
+    baselineRef.current.trunkAngleDeg = Number.isFinite(lastCompAngleDegRef.current) ? lastCompAngleDegRef.current : null;
+    baselineRef.current.distanceRatio = lastDistanceRatioRef.current;
+    stillSinceRef.current = null;
+    lastCalibUiAtRef.current = 0;
+    setCalibUi({ progress: 1, secondsLeft: 0 });
+    setCalibration({ state: "skipped", startedAt: null });
+    setMessage("Calibration skipped. Move slowly and stay in range.");
+    speakAndLog("Calibration skipped. Tracking may be less accurate.", { severity: "warning", dedupeKey: "calib_skipped", kind: "event" });
   }
 
   const tempoDurations = useMemo(() => {
@@ -790,28 +814,59 @@ export function PoseSession(props: {
     if (quality.ok) qualityOkFramesRef.current = Math.min(30, qualityOkFramesRef.current + 1);
     else qualityOkFramesRef.current = 0;
     const qualityStableOk = qualityOkFramesRef.current >= 8;
+    const lightingStableOk = lightingOkFramesRef.current >= 3;
     if (quality.message !== lastTrackingNoteRef.current) {
       lastTrackingNoteRef.current = quality.message;
       setTrackingNote(quality.message);
     }
 
+    // Keep latest values for demo-friendly actions (skip calibration).
+    lastCompAngleDegRef.current = compAngleDeg;
+    lastDistanceRatioRef.current = quality.distance?.ratio ?? null;
+
     // Calibration step (2s standstill) once tracking quality is good.
-    if (calibration.state !== "done" && qualityStableOk) {
+    {
+      const CALIB_MS = 2000;
+      const STILL_PRE_MS = 600; // require a brief stable window before starting calibration (reduces jitter restarts)
       const still = Math.abs(speedDegPerSec ?? 0) < 20;
-      if (still) {
-        if (calibration.state === "idle") {
-          setCalibration({ state: "calibrating", startedAt: nowMs });
-          setMessage("Calibration: stand still for 2 seconds.");
-          speakAndLog("Calibration. Please stand still for two seconds.", { severity: "info", dedupeKey: "calib_start", kind: "event" });
-        } else if (calibration.state === "calibrating" && calibration.startedAt && nowMs - calibration.startedAt >= 2000) {
+      const canCalibrate = qualityStableOk && lightingStableOk;
+
+      if (calibration.state === "calibrating" && calibration.startedAt) {
+        // Update UI at ~6Hz while calibrating.
+        if (nowMs - lastCalibUiAtRef.current >= 160) {
+          lastCalibUiAtRef.current = nowMs;
+          const elapsed = Math.max(0, nowMs - calibration.startedAt);
+          const progress = clamp(elapsed / CALIB_MS, 0, 1);
+          const secondsLeft = Math.max(0, Math.ceil((CALIB_MS - elapsed) / 1000));
+          setCalibUi({ progress, secondsLeft });
+        }
+
+        if (!still) {
+          // Movement cancels calibration; return to idle.
+          stillSinceRef.current = null;
+          setCalibration({ state: "idle", startedAt: null });
+        } else if (nowMs - calibration.startedAt >= CALIB_MS) {
           baselineRef.current.trunkAngleDeg = compAngleDeg;
           baselineRef.current.distanceRatio = quality.distance.ratio;
           setCalibration({ state: "done", startedAt: null });
-          setMessage("Calibration complete. Move slowly and stay in range.");
-          speakAndLog("Calibration complete. Move slowly and stay in range.", { severity: "info", dedupeKey: "calib_done", kind: "event" });
+          setCalibUi({ progress: 1, secondsLeft: 0 });
+          setMessage("Calibration complete. You can start moving.");
+          speakAndLog("Calibration complete. You can start moving.", { severity: "info", dedupeKey: "calib_done", kind: "event" });
         }
-      } else if (calibration.state === "calibrating") {
-        setCalibration({ state: "idle", startedAt: null });
+      } else if (calibration.state === "idle" && canCalibrate) {
+        // Only begin calibration when stable for a moment.
+        if (still) {
+          if (!stillSinceRef.current) stillSinceRef.current = nowMs;
+          if (stillSinceRef.current && nowMs - stillSinceRef.current >= STILL_PRE_MS) {
+            stillSinceRef.current = null;
+            setCalibUi({ progress: 0, secondsLeft: 2 });
+            setCalibration({ state: "calibrating", startedAt: nowMs });
+            setMessage("Calibrating posture (2 seconds). Hold still.");
+            speakAndLog("Calibrating. Hold still for two seconds.", { severity: "info", dedupeKey: "calib_start", kind: "event" });
+          }
+        } else {
+          stillSinceRef.current = null;
+        }
       }
     }
 
@@ -819,16 +874,17 @@ export function PoseSession(props: {
     const baselineCompensation = baselineTrunk != null ? Math.abs(compAngleDeg - baselineTrunk) > 12 : false;
 
     // Pose + lighting gate: guide instead of scoring if capture quality is poor (or calibration not finished).
-    const lightingStableOk = lightingOkFramesRef.current >= 3;
-    if (!qualityStableOk || !lightingStableOk || calibration.state !== "done") {
+    if (!qualityStableOk || !lightingStableOk || (calibration.state !== "done" && calibration.state !== "skipped")) {
       setPhase("positioning");
       goodPoseSinceRef.current = null;
       exerciseActiveRef.current = false;
       setLevel("yellow");
 
       const helpMsg =
-        calibration.state !== "done"
-          ? "Calibration in progress. Please stand still."
+        calibration.state !== "done" && calibration.state !== "skipped"
+          ? calibration.state === "calibrating"
+            ? `Calibrating... hold still (${calibUi.secondsLeft}s).`
+            : "Calibration ready. Hold still for 2 seconds."
           : !lightingStableOk
             ? `Improve capture quality: ${lastLightingNoteRef.current || "Adjust lighting and reduce glare."}`
             : `Adjust position: ${quality.message}${confidencePct < 60 ? " Improve lighting and reduce background clutter." : ""}`;
@@ -1295,6 +1351,11 @@ export function PoseSession(props: {
       smootherRef.current.reset();
       baselineRef.current = { trunkAngleDeg: null, distanceRatio: null };
       setCalibration({ state: "idle", startedAt: null });
+      setCalibUi({ progress: 0, secondsLeft: 2 });
+      stillSinceRef.current = null;
+      lastCalibUiAtRef.current = 0;
+      jerkFramesRef.current = 0;
+      outOfRangeFramesRef.current = 0;
       logEvent({ ts: new Date().toISOString(), severity: "info", type: "session_start", message: "Session started." });
     } catch (e) {
       setStatus("error");
@@ -1414,6 +1475,14 @@ export function PoseSession(props: {
             <video ref={videoRef} className="h-[360px] w-full object-cover sm:h-[460px]" playsInline muted autoPlay />
             <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
 
+            {running && calibration.state !== "done" && calibration.state !== "skipped" ? (
+              <div className="pointer-events-auto absolute right-3 top-3">
+                <Button variant="outline" size="sm" onClick={skipCalibration}>
+                  Skip calibration
+                </Button>
+              </div>
+            ) : null}
+
             {running && phase === "active" && tempoEnabled ? (
               <div className="pointer-events-none absolute bottom-3 left-3 right-3 rounded-2xl border border-border bg-background/85 px-3 py-2 text-xs text-foreground shadow-soft backdrop-blur">
                 <div className="flex items-center justify-between gap-3">
@@ -1448,10 +1517,31 @@ export function PoseSession(props: {
 
             {running ? (
               <div className="pointer-events-none absolute left-3 top-3 max-w-[85%] rounded-2xl border border-border bg-background/85 px-3 py-2 text-xs text-foreground shadow-soft backdrop-blur">
-                <div className="font-medium">{phase === "positioning" ? "Positioning" : "Live guidance"}</div>
-                <div className="mt-0.5 text-muted-foreground">
-                  {phase === "positioning" ? "Step back and center yourself. Keep full body visible." : "Move slowly and stay within the safe range."}
+                <div className="font-medium">
+                  {calibration.state !== "done" && calibration.state !== "skipped"
+                    ? "Calibration"
+                    : phase === "positioning"
+                      ? "Positioning"
+                      : "Live guidance"}
                 </div>
+                {calibration.state === "calibrating" ? (
+                  <>
+                    <div className="mt-0.5 text-muted-foreground">Hold still - calibrating ({calibUi.secondsLeft}s).</div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">Improves angle accuracy and reduces false stops.</div>
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted/40">
+                      <div className="h-2 rounded-full bg-sky-500/70 transition-[width]" style={{ width: `${Math.round(calibUi.progress * 100)}%` }} />
+                    </div>
+                  </>
+                ) : calibration.state !== "done" && calibration.state !== "skipped" ? (
+                  <>
+                    <div className="mt-0.5 text-muted-foreground">Hold still for 2 seconds to calibrate posture.</div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">This sets a baseline so guidance stays stable.</div>
+                  </>
+                ) : (
+                  <div className="mt-0.5 text-muted-foreground">
+                    {phase === "positioning" ? "Step back and center yourself. Keep full body visible." : "Move slowly and stay within the safe range."}
+                  </div>
+                )}
               </div>
             ) : null}
             {!running ? (
@@ -1480,7 +1570,7 @@ export function PoseSession(props: {
             <div>
               <div className="text-xs text-muted-foreground">Session phase</div>
               <div className="text-sm font-medium">
-                {calibration.state !== "done" ? "Calibration" : phase === "positioning" ? "Positioning" : "Active guidance"}
+                {calibration.state !== "done" && calibration.state !== "skipped" ? "Calibration" : phase === "positioning" ? "Positioning" : "Active guidance"}
               </div>
             </div>
           </div>
